@@ -540,14 +540,6 @@ static void drawRounds(uint32_t now, uint16_t fg, uint16_t bg) {
   spr.drawString(num, x, 0, 2);
 }
 
-// 黄色に変わる残り秒数。補充矢のように行射時間が短いと画面全部が黄色に
-// なってしまうので、行射時間の半分を超えないところで頭打ちにする。
-// 180秒なら 30秒のまま、40秒なら残り20秒から黄色になる。
-static uint16_t warnSec() {
-  const uint16_t half = durationSec / 2;
-  return (WARN_SEC < half) ? WARN_SEC : half;
-}
-
 // メイクアップ中は「立」の代わりに MAKEUP と出す。待機は上段左がそのまま
 // MAKEUP なので、そちらには出さない。上段左(フォント2)の高さに合わせて置く。
 static void drawMakeupTag(uint16_t fg, uint16_t bg) {
@@ -560,7 +552,7 @@ static void drawMakeupTag(uint16_t fg, uint16_t bg) {
 // 信号の色。行射だけが緑/黄で、それ以外は赤。
 static uint16_t signalColor(uint32_t now) {
   if (state == SHOOTING) {
-    return (remainingSec(now) <= warnSec()) ? COLOR_YELLOW : COLOR_GREEN;
+    return (remainingSec(now) <= WARN_SEC) ? COLOR_YELLOW : COLOR_GREEN;
   }
   return COLOR_RED;
 }
