@@ -8,6 +8,10 @@
  *   開始前 --[A]--> ムーブアップ 10秒(赤) --> 行射 180秒(緑 / 残り30秒で黄)
  *          --> (次の立 または 行射終了)
  *
+ * 行射終了(FINISHED)からボタンBを長押しすると、補充矢・シュートオフ用の
+ * メイクアップモードに入ります。ボタンBで行射時間を選び、ボタンAを押すと
+ * 10秒のムーブアップ + 選んだ行射 を1回だけ行って、もとの設定に戻ります。
+ *
  * 通信は仕様どおり固定:
  *   EIA RS-485準拠 / 半二重 / 調歩同期 / 9600bps / スタート1 / データ8 / パリティ無 / ストップ1
  *
@@ -15,6 +19,7 @@
  *   ボタンA 短押し  = Space  開始 / 再開
  *   ボタンA 長押し  = 右矢印 早送り (この立を終わりにして次へ)
  *   ボタンB 短押し  = Enter  中断 (5声)
+ *   ボタンB 長押し  = —      中断中に待機へ戻す / 行射終了からメイクアップ
  */
 
 // M5StickC Plus を使う場合は include を入れ替えてください
@@ -29,6 +34,13 @@ static const uint16_t WARN_SEC     = 30;   // 行射残りこの秒数から黄�
 // 1 -> 2 -> 3 -> 4 -> ∞ -> 1 と切り替えられるので、ここは起動時の値。
 static const uint16_t REPEAT_DEFAULT = 1;
 static const uint16_t REPEAT_MAX     = 4;  // ボタンBで回せる上限 (この次が ∞)
+
+// 補充矢・シュートオフ用の「メイクアップ」の行射時間 [秒]。行射終了(FINISHED)で
+// ボタンBを長押しすると入り、そこでボタンBを押すたびにこの表を順に回る。
+// 最後まで行くと先頭に戻る。
+static const uint16_t MAKEUP_SEC_TABLE[] = {20, 30, 40, 60, 80, 90, 100, 120, 150, 160};
+static const uint8_t  MAKEUP_SEC_COUNT   =
+    sizeof(MAKEUP_SEC_TABLE) / sizeof(MAKEUP_SEC_TABLE[0]);
 
 // UD0040 のブザー音色: 1 = ブザー1 (0x01) / 2 = ブザー2 (0x00) / 0 = 鳴らさない
 static const uint8_t  BUZZER_KIND_SEL = 1;
@@ -193,6 +205,7 @@ static const uint8_t BUZZER_ALARM  = 5;  // ボタンBによる中断
 // ============================================================ 状態機械
 enum State : uint8_t {
   STANDBY,        // 待機（ここで繰り返し回数を設定できる）
+  MAKEUP_STANDBY, // メイクアップ待機（ここで補充矢の行射時間を設定できる）
   MOVEUP,         // ムーブアップ
   SHOOTING,       // 行射
   HALT_MOVEUP,    // 中断（ムーブアップ中）
@@ -208,10 +221,25 @@ static uint32_t elapsedMs   = 0;      // 停止中はここに固定される
 static uint32_t runOrigin   = 0;
 static bool     running     = false;  // false = 停止中
 
+// 補充矢・シュートオフを1立だけ行うモード。ムーブアップ+行射が終わると解除され、
+// 繰り返し回数などのもとの設定に戻る。
+static bool     makeupMode  = false;
+static uint8_t  makeupIndex = 0;      // MAKEUP_SEC_TABLE の位置
+
 static uint32_t beepAnchor  = 0;
 static uint8_t  beepCount   = 0;
 static bool     beepBlink   = false;
 static bool     beepArmed   = false;
+
+// 今選んでいるメイクアップの行射時間。
+static uint16_t makeupSec() {
+  return MAKEUP_SEC_TABLE[makeupIndex];
+}
+
+// この立の行射時間。メイクアップ中だけ選んだ時間になる。
+static uint16_t shootingSec() {
+  return makeupMode ? makeupSec() : SHOOTING_SEC;
+}
 
 static uint32_t currentElapsedMs(uint32_t now) {
   return running ? elapsedMs + (now - runOrigin) : elapsedMs;
@@ -272,7 +300,7 @@ static void startMoveup(uint32_t now) {
 static void startShooting(uint32_t now, bool resuming) {
   state = SHOOTING;
   if (!resuming) {
-    durationSec = SHOOTING_SEC;
+    durationSec = shootingSec();
     elapsedMs   = 0;
   }
   runOrigin = now;
@@ -291,6 +319,11 @@ static void finish(uint32_t now) {
 
 // ムーブアップ+行射の1ラウンド(「立」)が終わった。早送りでも自然終了でも同じ処理。
 static void completeRound(uint32_t now) {
+  if (makeupMode) {      // メイクアップは1立だけ。終わったらもとの設定に戻る
+    makeupMode = false;
+    finish(now);         // 3声
+    return;
+  }
   if (repeatCount == 0 || roundNo < repeatCount) {
     if (roundNo < 0xFFFF) roundNo++;   // ∞ のときに一周しないようにする
     startMoveup(now);  // 2声
@@ -302,11 +335,40 @@ static void completeRound(uint32_t now) {
 // 待機に戻す。繰り返し回数の設定はそのまま残す。
 static void resetToStandby() {
   roundNo     = 1;
+  makeupMode  = false;
   state       = STANDBY;
   durationSec = MOVEUP_SEC;
   elapsedMs   = 0;
   running     = false;
   silence();
+}
+
+// 行射終了から、補充矢・シュートオフのメイクアップ待機に入る。無音。
+// 中央には選んでいる行射時間が出るので、そのまま設定の表示になる。
+static void enterMakeup() {
+  makeupMode  = true;
+  state       = MAKEUP_STANDBY;
+  durationSec = makeupSec();
+  elapsedMs   = 0;
+  running     = false;
+  silence();
+}
+
+// メイクアップをやめて行射終了に戻す。無音。
+static void exitMakeup() {
+  makeupMode  = false;
+  state       = FINISHED;
+  durationSec = 0;
+  elapsedMs   = 0;
+  running     = false;
+  silence();
+}
+
+// メイクアップの行射時間を 20 -> 30 -> 40 -> ... -> 160 -> 20 と回す。
+static void cycleMakeupSec() {
+  makeupIndex = (uint8_t)((makeupIndex + 1) % MAKEUP_SEC_COUNT);
+  durationSec = makeupSec();
+  elapsedMs   = 0;
 }
 
 // 繰り返し回数を 1 -> 2 -> 3 -> 4 -> ∞ -> 1 と回す。
@@ -319,10 +381,12 @@ static void cycleRepeat() {
 // --- ボタン操作 (対応する状態以外では何も起きない) ---
 static void keySpace(uint32_t now) {   // ボタンA 短押し = 開始 / 再開
   switch (state) {
-    case STANDBY:       startMoveup(now); break;              // 2声
+    case STANDBY:                                              // 2声
+    case MAKEUP_STANDBY: startMoveup(now); break;               // 10秒のムーブアップから
     case HALT_MOVEUP:                                          // 無音。ここでリセット
-      state       = STANDBY;
-      durationSec = MOVEUP_SEC;
+      // メイクアップ中は、もとの待機ではなくメイクアップ待機に戻す
+      state       = makeupMode ? MAKEUP_STANDBY : STANDBY;
+      durationSec = makeupMode ? makeupSec() : MOVEUP_SEC;
       elapsedMs   = 0;
       break;
     case HALT_SHOOTING: startShooting(now, true); break;       // 1声
@@ -338,6 +402,8 @@ static void keyRight(uint32_t now) {   // ボタンA 長押し = 早送り
 static void keyEnter(uint32_t now) {   // ボタンB 短押し = 繰り返し回数 / 中断
   if (state == STANDBY) {
     cycleRepeat();                   // 無音。待機中だけ回数を設定できる
+  } else if (state == MAKEUP_STANDBY) {
+    cycleMakeupSec();                // 無音。メイクアップの行射時間を設定
   } else if (state == MOVEUP) {
     elapsedMs = currentElapsedMs(now);
     running   = false;
@@ -351,8 +417,10 @@ static void keyEnter(uint32_t now) {   // ボタンB 短押し = 繰り返し回
   }
 }
 
-static void keyReset() {               // ボタンB 長押し = 中断中に待機へ戻す
+static void keyReset() {               // ボタンB 長押し = 待機へ戻す / メイクアップ
   if (state == HALT_MOVEUP || state == HALT_SHOOTING) resetToStandby();
+  else if (state == FINISHED)       enterMakeup();  // 補充矢・シュートオフへ
+  else if (state == MAKEUP_STANDBY) exitMakeup();   // やめて行射終了へ戻る
 }
 
 // 時間切れで自動的に次の状態へ進んでいないか確認する。
@@ -425,6 +493,7 @@ static void chooseFont(uint16_t maxValue) {
 static const char* stateLabel() {
   switch (state) {
     case STANDBY:       return "STANDBY";    // 待機
+    case MAKEUP_STANDBY: return "MAKEUP";    // メイクアップ待機
     case MOVEUP:        return "MOVE UP";    // ムーブアップ
     case SHOOTING:      return "SHOOTING";   // 行射
     case HALT_MOVEUP:
@@ -471,10 +540,27 @@ static void drawRounds(uint32_t now, uint16_t fg, uint16_t bg) {
   spr.drawString(num, x, 0, 2);
 }
 
+// 黄色に変わる残り秒数。補充矢のように行射時間が短いと画面全部が黄色に
+// なってしまうので、行射時間の半分を超えないところで頭打ちにする。
+// 180秒なら 30秒のまま、40秒なら残り20秒から黄色になる。
+static uint16_t warnSec() {
+  const uint16_t half = durationSec / 2;
+  return (WARN_SEC < half) ? WARN_SEC : half;
+}
+
+// メイクアップ中は「立」の代わりに MAKEUP と出す。待機は上段左がそのまま
+// MAKEUP なので、そちらには出さない。上段左(フォント2)の高さに合わせて置く。
+static void drawMakeupTag(uint16_t fg, uint16_t bg) {
+  if (state == MAKEUP_STANDBY) return;
+  spr.setTextColor(fg, bg);
+  spr.setTextDatum(TR_DATUM);
+  spr.drawString("MAKEUP", W - 4, 4, 1);
+}
+
 // 信号の色。行射だけが緑/黄で、それ以外は赤。
 static uint16_t signalColor(uint32_t now) {
   if (state == SHOOTING) {
-    return (remainingSec(now) <= WARN_SEC) ? COLOR_YELLOW : COLOR_GREEN;
+    return (remainingSec(now) <= warnSec()) ? COLOR_YELLOW : COLOR_GREEN;
   }
   return COLOR_RED;
 }
@@ -495,7 +581,8 @@ static void render(uint32_t now, uint16_t value, bool blank) {
   spr.setTextDatum(TL_DATUM);
   spr.drawString(stateLabel(), 4, 0, 2);
 
-  drawRounds(now, fg, bg);
+  if (makeupMode) drawMakeupTag(fg, bg);
+  else            drawRounds(now, fg, bg);
 
   // 中央: 残り秒数
   if (!blank) {
