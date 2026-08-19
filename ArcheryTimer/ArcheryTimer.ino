@@ -27,9 +27,15 @@ static const uint16_t SHOOTING_SEC = 180;  // 行射時間 [秒]
 static const uint16_t WARN_SEC     = 30;   // 行射残りこの秒数から黄色 [秒]
 static const uint16_t REPEAT       = 1;    // 繰り返す「立」の数
 
-// ブザー音色: 1 = ブザー1 (0x01) / 2 = ブザー2 (0x00) / 0 = 鳴らさない
+// UD0040 のブザー音色: 1 = ブザー1 (0x01) / 2 = ブザー2 (0x00) / 0 = 鳴らさない
 static const uint8_t  BUZZER_KIND_SEL = 1;
-static const bool     LOCAL_BUZZER    = true;  // M5StickC 内蔵ブザーも同時に鳴らす
+
+// M5StickC 本体側でも鳴らす場合のピン。-1 で鳴らさない。
+//   M5StickC Plus : 内蔵ブザーが G2 にあるので 2 を指定する
+//   無印 M5StickC : 内蔵ブザーは無い。SPK HAT などを繋いだピン (例: 26) を指定する
+// UD0040 のブザーは、この設定とは無関係に BUZZER_KIND_SEL で鳴る。
+static const int      BUZZER_PIN  = -1;
+static const uint16_t BUZZER_FREQ = 2000;
 
 static const uint8_t  SCREEN_ROTATION = 3;   // 3 または 1 で横向き（上下逆なら 1）
 static const uint8_t  SCREEN_BRIGHT   = 12;  // 7..15
@@ -133,6 +139,40 @@ static void sendInit() {
   RS485.write(frame, buildFrame(body, sizeof(body), frame));
   RS485.flush();
 }
+
+// ============================================================ 本体ブザー
+// M5StickC ライブラリには M5.Beep が無いため、ledc を直接使う。
+// ESP32 Arduino core は 2.x と 3.x で API が違うので両方に対応する。
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+
+static void buzzerBegin() {
+  if (BUZZER_PIN >= 0) ledcAttach(BUZZER_PIN, BUZZER_FREQ, 10);
+}
+static void buzzerOn() {
+  if (BUZZER_PIN >= 0) ledcWriteTone(BUZZER_PIN, BUZZER_FREQ);
+}
+static void buzzerOff() {
+  if (BUZZER_PIN >= 0) ledcWrite(BUZZER_PIN, 0);
+}
+
+#else
+
+static const uint8_t BUZZER_CH = 0;
+static void buzzerBegin() {
+  if (BUZZER_PIN >= 0) {
+    ledcSetup(BUZZER_CH, BUZZER_FREQ, 10);
+    ledcAttachPin(BUZZER_PIN, BUZZER_CH);
+    ledcWrite(BUZZER_CH, 0);
+  }
+}
+static void buzzerOn() {
+  if (BUZZER_PIN >= 0) ledcWriteTone(BUZZER_CH, BUZZER_FREQ);
+}
+static void buzzerOff() {
+  if (BUZZER_PIN >= 0) ledcWrite(BUZZER_CH, 0);
+}
+
+#endif
 
 // ============================================================ 合図(ブザー)
 // 「0.7秒鳴動 -> 0.3秒インターバル」を count 回。回数だけ場面ごとに違う。
@@ -380,6 +420,8 @@ void setup() {
   spr.setColorDepth(16);
   spr.createSprite(W, H);
 
+  buzzerBegin();
+
   RS485.begin(RS485_BAUD, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
   sendInit();
 
@@ -425,13 +467,13 @@ void loop() {
     sendDisplay(value, blank);
   }
 
-  // --- M5StickC 内蔵ブザー ---
-  if (LOCAL_BUZZER) {
+  // --- 本体側のブザー (BUZZER_PIN < 0 なら何もしない) ---
+  {
     static bool toneOn = false;
     const bool want = beepActiveAt(now);
     if (want != toneOn) {
       toneOn = want;
-      if (want) M5.Beep.tone(2000); else M5.Beep.mute();
+      if (want) buzzerOn(); else buzzerOff();
     }
   }
 
