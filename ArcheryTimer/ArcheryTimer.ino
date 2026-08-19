@@ -25,7 +25,10 @@
 static const uint16_t MOVEUP_SEC   = 10;   // ムーブアップ（準備）時間 [秒]
 static const uint16_t SHOOTING_SEC = 180;  // 行射時間 [秒]
 static const uint16_t WARN_SEC     = 30;   // 行射残りこの秒数から黄色 [秒]
-static const uint16_t REPEAT       = 1;    // 繰り返す「立」の数
+// 繰り返す「立」の数。0 は無制限(∞)。STANDBY 中にボタンBで
+// 1 -> 2 -> 3 -> 4 -> ∞ -> 1 と切り替えられるので、ここは起動時の値。
+static const uint16_t REPEAT_DEFAULT = 1;
+static const uint16_t REPEAT_MAX     = 4;  // ボタンBで回せる上限 (この次が ∞)
 
 // UD0040 のブザー音色: 1 = ブザー1 (0x01) / 2 = ブザー2 (0x00) / 0 = 鳴らさない
 static const uint8_t  BUZZER_KIND_SEL = 1;
@@ -42,7 +45,7 @@ static const uint8_t  SCREEN_ROTATION = 3;   // 3 または 1 で横向き（上
 // (それ以上を渡しても 12 に丸められる)。0..100 を取るライブラリを使っていて
 // 画面が暗い場合は 100 にしてください。
 static const uint8_t  SCREEN_BRIGHT   = 12;
-static const uint32_t LONG_PRESS_MS   = 800; // ボタンA長押し（早送り）の判定時間
+static const uint32_t LONG_PRESS_MS   = 800; // 長押しの判定時間
 
 // RS-485 ユニットの接続先 (M5StickC の Grove 端子)。RX/TX が逆の場合は入れ替えてください。
 static const int  RS485_RX_PIN = 33;
@@ -189,16 +192,17 @@ static const uint8_t BUZZER_ALARM  = 5;  // ボタンBによる中断
 
 // ============================================================ 状態機械
 enum State : uint8_t {
-  PRE_START,             // 開始前
-  MOVEUP,                // ムーブアップ
-  SHOOTING,              // 行射
-  INTERRUPTED_MOVEUP,    // 中断（ムーブアップ中）
-  INTERRUPTED_SHOOTING,  // 中断（行射中、時間はそのまま停止）
-  FINISHED               // 行射終了
+  STANDBY,        // 待機（ここで繰り返し回数を設定できる）
+  MOVEUP,         // ムーブアップ
+  SHOOTING,       // 行射
+  HALT_MOVEUP,    // 中断（ムーブアップ中）
+  HALT_SHOOTING,  // 中断（行射中、時間はそのまま停止）
+  FINISHED        // 行射終了
 };
 
-static State    state       = PRE_START;
+static State    state       = STANDBY;
 static uint16_t roundNo     = 1;
+static uint16_t repeatCount = REPEAT_DEFAULT;  // 0 = ∞
 static uint16_t durationSec = MOVEUP_SEC;
 static uint32_t elapsedMs   = 0;      // 停止中はここに固定される
 static uint32_t runOrigin   = 0;
@@ -287,34 +291,42 @@ static void finish(uint32_t now) {
 
 // ムーブアップ+行射の1ラウンド(「立」)が終わった。早送りでも自然終了でも同じ処理。
 static void completeRound(uint32_t now) {
-  if (roundNo < REPEAT) {
-    roundNo++;
+  if (repeatCount == 0 || roundNo < repeatCount) {
+    if (roundNo < 0xFFFF) roundNo++;   // ∞ のときに一周しないようにする
     startMoveup(now);  // 2声
   } else {
     finish(now);       // 3声
   }
 }
 
-static void resetToPreStart() {
+// 待機に戻す。繰り返し回数の設定はそのまま残す。
+static void resetToStandby() {
   roundNo     = 1;
-  state       = PRE_START;
+  state       = STANDBY;
   durationSec = MOVEUP_SEC;
   elapsedMs   = 0;
   running     = false;
   silence();
 }
 
+// 繰り返し回数を 1 -> 2 -> 3 -> 4 -> ∞ -> 1 と回す。
+static void cycleRepeat() {
+  if (repeatCount == 0)              repeatCount = 1;
+  else if (repeatCount >= REPEAT_MAX) repeatCount = 0;   // ∞
+  else                                repeatCount++;
+}
+
 // --- ボタン操作 (対応する状態以外では何も起きない) ---
-static void keySpace(uint32_t now) {   // ボタンA 短押し
+static void keySpace(uint32_t now) {   // ボタンA 短押し = 開始 / 再開
   switch (state) {
-    case PRE_START:            startMoveup(now); break;              // 2声
-    case INTERRUPTED_MOVEUP:                                          // 無音。ここでリセット
-      state       = PRE_START;
+    case STANDBY:       startMoveup(now); break;              // 2声
+    case HALT_MOVEUP:                                          // 無音。ここでリセット
+      state       = STANDBY;
       durationSec = MOVEUP_SEC;
       elapsedMs   = 0;
       break;
-    case INTERRUPTED_SHOOTING: startShooting(now, true); break;       // 1声
-    case FINISHED:             resetToPreStart(); break;              // 無音
+    case HALT_SHOOTING: startShooting(now, true); break;       // 1声
+    case FINISHED:      resetToStandby(); break;               // 無音
     default: break;
   }
 }
@@ -323,18 +335,24 @@ static void keyRight(uint32_t now) {   // ボタンA 長押し = 早送り
   if (state == MOVEUP || state == SHOOTING) completeRound(now);
 }
 
-static void keyEnter(uint32_t now) {   // ボタンB 短押し = 中断
-  if (state == MOVEUP) {
+static void keyEnter(uint32_t now) {   // ボタンB 短押し = 繰り返し回数 / 中断
+  if (state == STANDBY) {
+    cycleRepeat();                   // 無音。待機中だけ回数を設定できる
+  } else if (state == MOVEUP) {
     elapsedMs = currentElapsedMs(now);
     running   = false;
-    state     = INTERRUPTED_MOVEUP;
+    state     = HALT_MOVEUP;
     triggerBeep(BUZZER_ALARM, now);  // 5声
   } else if (state == SHOOTING) {
     elapsedMs = currentElapsedMs(now);
     running   = false;
-    state     = INTERRUPTED_SHOOTING;
+    state     = HALT_SHOOTING;
     triggerBeep(BUZZER_ALARM, now);  // 5声
   }
+}
+
+static void keyReset() {               // ボタンB 長押し = 中断中に待機へ戻す
+  if (state == HALT_MOVEUP || state == HALT_SHOOTING) resetToStandby();
 }
 
 // 時間切れで自動的に次の状態へ進んでいないか確認する。
@@ -406,13 +424,51 @@ static void chooseFont(uint16_t maxValue) {
 
 static const char* stateLabel() {
   switch (state) {
-    case PRE_START:            return "PRE-START";   // 開始前
-    case MOVEUP:               return "MOVE UP";     // ムーブアップ
-    case SHOOTING:             return "SHOOTING";    // 行射
-    case INTERRUPTED_MOVEUP:
-    case INTERRUPTED_SHOOTING: return "INTERRUPT";   // 中断
-    default:                   return "FINISHED";    // 行射終了
+    case STANDBY:       return "STANDBY";    // 待機
+    case MOVEUP:        return "MOVE UP";    // ムーブアップ
+    case SHOOTING:      return "SHOOTING";   // 行射
+    case HALT_MOVEUP:
+    case HALT_SHOOTING: return "HALT";       // 中断
+    default:            return "FINISHED";   // 行射終了
   }
+}
+
+// 無制限(∞)の印。フォントに無いので、円を2つ並べて自前で描く。
+static const int16_t INF_R  = 5;
+static const int16_t INF_W  = INF_R * 4;
+static const int16_t INF_CY = 8;   // 上段(フォント2、高さ16)の中心
+
+static void drawInfinity(int16_t rightX, uint16_t color) {
+  const int16_t cx2 = rightX - INF_R;
+  const int16_t cx1 = cx2 - INF_R * 2;
+  spr.drawCircle(cx1, INF_CY, INF_R,     color);
+  spr.drawCircle(cx1, INF_CY, INF_R - 1, color);
+  spr.drawCircle(cx2, INF_CY, INF_R,     color);
+  spr.drawCircle(cx2, INF_CY, INF_R - 1, color);
+}
+
+// 上段右の「立」。分母は繰り返し回数で、0 のときは ∞ を描く。
+// 待機中は設定できることが分かるように分母だけ点滅させる。
+static void drawRounds(uint32_t now, uint16_t fg, uint16_t bg) {
+  const bool hideDen = (state == STANDBY) && ((now / 400) % 2 == 1);
+
+  spr.setTextColor(fg, bg);
+  spr.setTextDatum(TR_DATUM);
+
+  int16_t x = W - 4;
+  if (repeatCount == 0) {
+    if (!hideDen) drawInfinity(x, fg);
+    x -= INF_W;
+  } else {
+    char den[8];
+    snprintf(den, sizeof(den), "%u", (unsigned)repeatCount);
+    if (!hideDen) spr.drawString(den, x, 0, 2);
+    x -= spr.textWidth(den, 2);
+  }
+
+  char num[12];
+  snprintf(num, sizeof(num), "%u/", (unsigned)roundNo);
+  spr.drawString(num, x, 0, 2);
 }
 
 // 信号の色。行射だけが緑/黄で、それ以外は赤。
@@ -439,10 +495,7 @@ static void render(uint32_t now, uint16_t value, bool blank) {
   spr.setTextDatum(TL_DATUM);
   spr.drawString(stateLabel(), 4, 0, 2);
 
-  char rounds[12];
-  snprintf(rounds, sizeof(rounds), "%u/%u", (unsigned)roundNo, (unsigned)REPEAT);
-  spr.setTextDatum(TR_DATUM);
-  spr.drawString(rounds, W - 4, 0, 2);
+  drawRounds(now, fg, bg);
 
   // 中央: 残り秒数
   if (!blank) {
@@ -489,7 +542,7 @@ void setup() {
   RS485.begin(RS485_BAUD, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
   sendInit();
 
-  resetToPreStart();
+  resetToStandby();
 }
 
 void loop() {
@@ -498,17 +551,24 @@ void loop() {
   const uint32_t now = millis();
 
   // --- 入力 ---
-  static bool longFired = false;
-  if (M5.BtnA.isPressed() && !longFired && M5.BtnA.pressedFor(LONG_PRESS_MS)) {
-    longFired = true;
-    keyRight(now);                       // 長押し = 早送り
+  static bool longFiredA = false;
+  if (M5.BtnA.isPressed() && !longFiredA && M5.BtnA.pressedFor(LONG_PRESS_MS)) {
+    longFiredA = true;
+    keyRight(now);                        // A長押し = 早送り
   }
   if (M5.BtnA.wasReleased()) {
-    if (!longFired) keySpace(now);       // 短押し = 開始/再開
-    longFired = false;
+    if (!longFiredA) keySpace(now);       // A短押し = 開始/再開
+    longFiredA = false;
   }
-  if (M5.BtnB.wasPressed()) {
-    keyEnter(now);                       // 中断
+
+  static bool longFiredB = false;
+  if (M5.BtnB.isPressed() && !longFiredB && M5.BtnB.pressedFor(LONG_PRESS_MS)) {
+    longFiredB = true;
+    keyReset();                           // B長押し = 中断中に待機へ戻す
+  }
+  if (M5.BtnB.wasReleased()) {
+    if (!longFiredB) keyEnter(now);       // B短押し = 繰り返し回数 / 中断
+    longFiredB = false;
   }
 
   updateState(now);
