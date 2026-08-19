@@ -217,6 +217,11 @@ static uint32_t totalMs() {
   return (uint32_t)durationSec * 1000UL;
 }
 
+static uint32_t remainingMs(uint32_t now) {
+  const uint32_t done = currentElapsedMs(now);
+  return (done >= totalMs()) ? 0 : (totalMs() - done);
+}
+
 static uint16_t remainingSec(uint32_t now) {
   const uint32_t sec = currentElapsedMs(now) / 1000;
   return (durationSec > sec) ? (uint16_t)(durationSec - sec) : 0;
@@ -344,8 +349,8 @@ static void updateState(uint32_t now) {
 }
 
 // ============================================================ 画面
-// 画面には「信号の色」と「残り秒数」だけを出す。遠くから一目で読めるように、
-// ラベル・立表示・残時間バーは置かず、数字を画面いっぱいまで大きくする。
+// 上段に状態と「立」、中央に残り秒数、下段に残時間バーを出す。
+// 合図が鳴っている間は枠を出す。中央の数字は、置ける範囲でいちばん大きくする。
 static TFT_eSprite spr = TFT_eSprite(&M5.Lcd);
 static int16_t W = 160, H = 80;
 
@@ -354,24 +359,31 @@ static const uint16_t COLOR_RED    = 0xF800;  // #FF0000
 static const uint16_t COLOR_GREEN  = 0x04A8;  // #009946
 static const uint16_t COLOR_YELLOW = 0xFFE0;  // #FFFF00
 
+// 上段(状態・立)と下段(バー)の高さ。中央の数字はその残りに収める。
+static const int16_t TOP_H = 18;
+static const int16_t BAR_H = 6;
+static const int16_t BAR_MARGIN = 2;
+static const int16_t BOTTOM_H = BAR_H + BAR_MARGIN * 2;
+
 // 数字に使うフォントの候補。「フォント番号, 拡大率」で、描画される高さは
-//   8x2=150 / 7x2=96 / 4x3=78 / 8x1=75 / 4x2=52 / 6x1=48 / 7x1=48 / ...
-// 大きい順に並べ、画面に収まる最初のものを使う。同じくらいの高さなら、
-// 拡大でギザギザにならない等倍のフォントを先に置いている。
+//   8x2=150 / 7x2=96 / 8x1=75 / 4x3=78 / 6x1=48 / 7x1=48 / 4x2=52 / ...
+// 大きい順に並べる。ただし高さがほぼ同じなら、拡大でギザギザにならない
+// 等倍のフォント (6x1, 7x1) を、拡大した 4x2 より先に置いている。
 struct FontChoice { uint8_t font; uint8_t size; };
 static const FontChoice FONT_CANDIDATES[] = {
-  {8, 2}, {7, 2}, {8, 1}, {4, 3}, {4, 2}, {6, 1}, {7, 1}, {2, 2}, {4, 1}, {2, 1}
+  {8, 2}, {7, 2}, {8, 1}, {4, 3}, {6, 1}, {7, 1}, {4, 2}, {2, 2}, {4, 1}, {2, 1}
 };
 
 static uint8_t  bigFont  = 7;
 static uint8_t  bigSize  = 1;
 static uint16_t sizedFor = 0xFFFF;  // このフォントを選んだときの基準値
 
-// maxValue を表示しても収まる、いちばん大きなフォントを選ぶ。
+// maxValue を表示しても中央の帯に収まる、いちばん大きなフォントを選ぶ。
 // フェーズごとに一度だけ決めるので、桁が減っても数字の大きさは変わらない。
 static void chooseFont(uint16_t maxValue) {
   char text[8];
   snprintf(text, sizeof(text), "%u", (unsigned)maxValue);
+  const int16_t availH = H - TOP_H - BOTTOM_H;
 
   bigFont = 2;
   bigSize = 1;
@@ -381,7 +393,7 @@ static void chooseFont(uint16_t maxValue) {
     // 高さを先に見る。ビルドに含まれていないフォントは高さ 0 になるので、
     // その場合は幅テーブルを引きにいかずに飛ばす。
     const int16_t h = spr.fontHeight(c.font);
-    if (h <= 0 || h > H) continue;
+    if (h <= 0 || h > availH) continue;
     const int16_t w = spr.textWidth(text, c.font);
     if (w > 0 && w <= W - 6) {
       bigFont = c.font;
@@ -390,6 +402,17 @@ static void chooseFont(uint16_t maxValue) {
     }
   }
   spr.setTextSize(1);
+}
+
+static const char* stateLabel() {
+  switch (state) {
+    case PRE_START:            return "PRE-START";   // 開始前
+    case MOVEUP:               return "MOVE UP";     // ムーブアップ
+    case SHOOTING:             return "SHOOTING";    // 行射
+    case INTERRUPTED_MOVEUP:
+    case INTERRUPTED_SHOOTING: return "INTERRUPT";   // 中断
+    default:                   return "FINISHED";    // 行射終了
+  }
 }
 
 // 信号の色。行射だけが緑/黄で、それ以外は赤。
@@ -410,15 +433,40 @@ static void render(uint32_t now, uint16_t value, bool blank) {
   const uint16_t fg = (bg == COLOR_YELLOW) ? TFT_BLACK : TFT_WHITE;
 
   spr.fillSprite(bg);
+  spr.setTextColor(fg, bg);
 
+  // 上段: 状態 / 立
+  spr.setTextDatum(TL_DATUM);
+  spr.drawString(stateLabel(), 4, 0, 2);
+
+  char rounds[12];
+  snprintf(rounds, sizeof(rounds), "%u/%u", (unsigned)roundNo, (unsigned)REPEAT);
+  spr.setTextDatum(TR_DATUM);
+  spr.drawString(rounds, W - 4, 0, 2);
+
+  // 中央: 残り秒数
   if (!blank) {
     char text[8];
     snprintf(text, sizeof(text), "%u", (unsigned)value);
-    spr.setTextColor(fg, bg);
     spr.setTextDatum(MC_DATUM);
     spr.setTextSize(bigSize);
-    spr.drawString(text, W / 2, H / 2, bigFont);
+    spr.drawString(text, W / 2, TOP_H + (H - TOP_H - BOTTOM_H) / 2, bigFont);
     spr.setTextSize(1);
+  }
+
+  // 下段: 残時間バー
+  const int16_t barX = 4, barW = W - 8, barY = H - BAR_H - BAR_MARGIN;
+  spr.drawRect(barX, barY, barW, BAR_H, fg);
+  if (durationSec > 0) {
+    const int16_t fill = (int16_t)((uint32_t)(barW - 2) * remainingMs(now) / totalMs());
+    if (fill > 0) spr.fillRect(barX + 1, barY + 1, fill, BAR_H - 2, fg);
+  }
+
+  // 合図が鳴っている間は枠を出す
+  if (beepActiveAt(now)) {
+    spr.drawRect(0, 0, W, H, fg);
+    spr.drawRect(1, 1, W - 2, H - 2, fg);
+    spr.drawRect(2, 2, W - 4, H - 4, fg);
   }
 
   spr.pushSprite(0, 0);
