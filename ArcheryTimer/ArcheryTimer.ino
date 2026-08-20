@@ -40,8 +40,8 @@ static const uint16_t REPEAT_MAX     = 4;  // ボタンBで回せる上限 (こ�
 
 // 補充矢(メイクアップ)とシュートオフの行射時間 [秒]。設定画面でボタンBを短押しする
 // たびに、その設定の表を順に回る。最後まで行くと先頭に戻る。
-static const uint16_t MAKEUP_SEC_TABLE[]   = {20, 30, 40, 60, 80, 90, 100, 120, 150, 160};
-static const uint16_t SHOOTOFF_SEC_TABLE[] = {30, 40, 20};
+static const uint16_t MAKEUP_SEC_TABLE[]   = {30, 40, 60, 80, 90, 100, 120, 150, 160, 20};
+static const uint16_t SHOOTOFF_SEC_TABLE[] = {20, 30, 40, 60};
 
 // 設定画面。ボタンB長押しで、この順に切り替えたあと待機(STANDBY)に戻る。
 struct MakeupPreset {
