@@ -565,14 +565,13 @@ static void drawRounds(uint32_t now, uint16_t fg, uint16_t bg) {
   spr.drawString(num, x, 0, 2);
 }
 
-// 補充矢・シュートオフの行射中は「立」の代わりに MAKEUP / SHOOTOFF と出す。
-// 設定画面は上段左がそのまま Setting - ... なので、そちらには出さない。
-// 上段左(フォント2)の高さに合わせて置く。
-static void drawMakeupTag(uint16_t fg, uint16_t bg) {
-  if (state == MAKEUP_SETTING) return;
-  spr.setTextColor(fg, bg);
-  spr.setTextDatum(TR_DATUM);
-  spr.drawString(preset().name, W - 4, 4, 1);
+// 補充矢・シュートオフの行射中に、上段右へ「立」の代わりに出す名前と設定秒数。
+// 例: MAKEUP(30s) / SHOOTOFF(40s)。設定画面は上段左がそのまま Setting - ... なので
+// 出さない。出すものがあれば true。
+static bool makeupTagText(char* buf, size_t n) {
+  if (!makeupMode || state == MAKEUP_SETTING) return false;
+  snprintf(buf, n, "%s(%us)", preset().name, (unsigned)makeupSec());
+  return true;
 }
 
 // 設定画面の中央「[ 20 ]sec」。数字の枠は3桁ぶんで固定してあるので、2桁でも
@@ -653,14 +652,24 @@ static void render(uint32_t now, uint16_t value, bool blank) {
   spr.fillSprite(bg);
   spr.setTextColor(fg, bg);
 
-  // 上段: 状態 / 立。設定画面は文字数が多いので、入らなければ小さい字にする
+  // 上段: 状態と、「立」または補充矢・シュートオフの名前と秒数。
+  // 状態はフォント2で出すが、文字数が多くて右側と並ばないときは小さい字にする。
+  char tag[24];
+  const bool    hasTag = makeupTagText(tag, sizeof(tag));
+  const int16_t tagW   = hasTag ? spr.textWidth(tag, 1) : 0;
+  const int16_t availW = W - 8 - (hasTag ? tagW + 6 : 0);
+
   const char* label = stateLabel();
   spr.setTextDatum(TL_DATUM);
-  if (spr.textWidth(label, 2) <= W - 8) spr.drawString(label, 4, 0, 2);
-  else                                  spr.drawString(label, 4, 4, 1);
+  if (spr.textWidth(label, 2) <= availW) spr.drawString(label, 4, 0, 2);
+  else                                   spr.drawString(label, 4, 4, 1);
 
-  if (makeupMode) drawMakeupTag(fg, bg);
-  else            drawRounds(now, fg, bg);
+  if (hasTag) {
+    spr.setTextDatum(TR_DATUM);
+    spr.drawString(tag, W - 4, 4, 1);
+  } else if (!makeupMode) {
+    drawRounds(now, fg, bg);
+  }
 
   // 中央: 設定画面は「[ 20 ]sec」、それ以外は残り秒数
   if (state == MAKEUP_SETTING) {
