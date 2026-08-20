@@ -52,11 +52,11 @@ static const uint8_t  BUZZER_KIND_SEL = 1;
 static const int      BUZZER_PIN  = -1;
 static const uint16_t BUZZER_FREQ = 2000;
 
-static const uint8_t  SCREEN_ROTATION = 3;   // 3 または 1 で横向き（上下逆なら 1）
+static const uint8_t  SCREEN_ROTATION = 1;   // 3 または 1 で横向き（上下逆なら 1）
 // 画面の明るさ。M5StickC ライブラリの ScreenBreath() は 7..12 で、12 が最大
 // (それ以上を渡しても 12 に丸められる)。0..100 を取るライブラリを使っていて
-// 画面が暗い場合は 100 にしてください。
-static const uint8_t  SCREEN_BRIGHT   = 12;
+// 画面が暗い場合は 100 にしてください。 → 100じゃないと暗いので 100にする。
+static const uint8_t  SCREEN_BRIGHT   = 100;
 static const uint32_t LONG_PRESS_MS   = 800; // 長押しの判定時間
 
 // RS-485 ユニットの接続先 (M5StickC の Grove 端子)。RX/TX が逆の場合は入れ替えてください。
