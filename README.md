@@ -83,8 +83,8 @@ B を短押しするたびに、この立の行射時間が切り替わります
 
 | 設定 | 行射時間の並び |
 | --- | --- |
-| `Setting - MAKEUP` | 20 → 30 → 40 → 60 → 80 → 90 → 100 → 120 → 150 → 160 → 20 → ... |
-| `Setting - SHOOTOFF` | 30 → 40 → 20 → 30 → ... |
+| `Setting - MAKEUP` | 30 → 40 → 60 → 80 → 90 → 100 → 120 → 150 → 160 → 20 → 30 → ... |
+| `Setting - SHOOTOFF` | 20 → 30 → 40 → 60 → 20 → ... |
 
 A を押すと、通常どおり **10秒のムーブアップ**（2声・赤画面）から始まり、続いて選んだ秒数の行射（1声）になります。
 行射が終わると3声で行射終了に戻り、**この立だけで自動的に解除されて、もとの設定に戻ります**。
@@ -99,8 +99,8 @@ A を押すと、通常どおり **10秒のムーブアップ**（2声・赤画�
 秒数の並びは `MAKEUP_SEC_TABLE` / `SHOOTOFF_SEC_TABLE` で変えられます。個数はいくつでも構いません。
 
 ```cpp
-static const uint16_t MAKEUP_SEC_TABLE[]   = {20, 30, 40, 60, 80, 90, 100, 120, 150, 160};
-static const uint16_t SHOOTOFF_SEC_TABLE[] = {30, 40, 20};
+static const uint16_t MAKEUP_SEC_TABLE[]   = {30, 40, 60, 80, 90, 100, 120, 150, 160, 20};
+static const uint16_t SHOOTOFF_SEC_TABLE[] = {20, 30, 40, 60};
 ```
 
 黄色に変わる残り秒数は `WARN_SEC`（30秒）のままです。20秒や30秒を選んだ場合は
@@ -113,7 +113,7 @@ static const uint16_t SHOOTOFF_SEC_TABLE[] = {30, 40, 20};
 | 状態 | 画面の色 | 文字 | 表示 |
 | --- | --- | --- | --- |
 | STANDBY（待機） | 赤 | 白 | ムーブアップの秒数 (10) |
-| Setting - MAKEUP / SHOOTOFF（設定） | 黒 | 白 | 選んでいる行射時間 `[ 20 ]sec` |
+| Setting - MAKEUP / SHOOTOFF（設定） | 黒 | 白 | 選んでいる行射時間 `[ 30 ]sec` |
 | MOVE UP（ムーブアップ） | 赤 | 白 | 残り秒数 10→0 |
 | SHOOTING（行射） | 緑 | 白 | 残り秒数 180→31 |
 | SHOOTING（残り30秒以下） | 黄 | 黒 | 残り秒数 30→0 |
@@ -175,8 +175,8 @@ static const uint16_t WARN_SEC     = 30;   // 行射残りこの秒数から黄�
 static const uint16_t REPEAT_DEFAULT = 1;  // 起動時の繰り返し回数 (0 = ∞)
 static const uint16_t REPEAT_MAX     = 4;  // ボタンBで回せる上限 (この次が ∞)
 // 補充矢・シュートオフの行射時間 [秒]
-static const uint16_t MAKEUP_SEC_TABLE[]   = {20, 30, 40, 60, 80, 90, 100, 120, 150, 160};
-static const uint16_t SHOOTOFF_SEC_TABLE[] = {30, 40, 20};
+static const uint16_t MAKEUP_SEC_TABLE[]   = {30, 40, 60, 80, 90, 100, 120, 150, 160, 20};
+static const uint16_t SHOOTOFF_SEC_TABLE[] = {20, 30, 40, 60};
 ```
 
 3射（120秒）や6射（240秒）にする場合は `SHOOTING_SEC` を書き換えます。
