@@ -22,7 +22,7 @@
  *   ボタンA 短押し  = Space  開始 / 再開
  *   ボタンA 長押し  = 右矢印 早送り (この立を終わりにして次へ)
  *   ボタンB 短押し  = Enter  中断 (5声)
- *   ボタンB 長押し  = —      中断中に待機へ戻す / 設定画面(MAKEUP/SHOOTOFF)を回す
+ *   ボタンB 長押し  = —      中断 (5声) / 中断中に待機へ戻す / 設定画面を回す
  */
 
 // M5StickC Plus を使う場合は include を入れ替えてください
@@ -412,28 +412,32 @@ static void keyRight(uint32_t now) {   // ボタンA 長押し = 早送り
   if (state == MOVEUP || state == SHOOTING) completeRound(now);
 }
 
-static void keyEnter(uint32_t now) {   // ボタンB 短押し = 繰り返し回数 / 中断
+// 行射中・ムーブアップ中を中断して止める (5声)。それ以外の状態では何も起きない。
+// ボタンB は短押しでも長押しでも中断できる。
+static void keyHalt(uint32_t now) {
+  if (state != MOVEUP && state != SHOOTING) return;
+  elapsedMs = currentElapsedMs(now);
+  running   = false;
+  state     = (state == MOVEUP) ? HALT_MOVEUP : HALT_SHOOTING;
+  triggerBeep(BUZZER_ALARM, now);  // 5声
+}
+
+static void keyEnter(uint32_t now) {   // ボタンB 短押し = 繰り返し回数 / 行射時間 / 中断
   if (state == STANDBY) {
     cycleRepeat();                   // 無音。待機中だけ回数を設定できる
   } else if (state == MAKEUP_SETTING) {
     cycleMakeupSec();                // 無音。設定画面では行射時間を選ぶ
-  } else if (state == MOVEUP) {
-    elapsedMs = currentElapsedMs(now);
-    running   = false;
-    state     = HALT_MOVEUP;
-    triggerBeep(BUZZER_ALARM, now);  // 5声
-  } else if (state == SHOOTING) {
-    elapsedMs = currentElapsedMs(now);
-    running   = false;
-    state     = HALT_SHOOTING;
-    triggerBeep(BUZZER_ALARM, now);  // 5声
+  } else {
+    keyHalt(now);                    // ムーブアップ・行射中なら中断 (5声)
   }
 }
 
-// ボタンB 長押し = 中断中は待機へ戻す。それ以外は設定画面を
-//   Setting - MAKEUP -> Setting - SHOOTOFF -> STANDBY -> ... と回す。
-static void keyReset() {
-  if (state == HALT_MOVEUP || state == HALT_SHOOTING) {
+// ボタンB 長押し = ムーブアップ・行射中は中断 (短押しと同じ)。中断中は待機へ戻す。
+// それ以外は設定画面を Setting - MAKEUP -> Setting - SHOOTOFF -> STANDBY -> ... と回す。
+static void keyReset(uint32_t now) {
+  if (state == MOVEUP || state == SHOOTING) {
+    keyHalt(now);                                // 中断 (5声)
+  } else if (state == HALT_MOVEUP || state == HALT_SHOOTING) {
     resetToStandby();
   } else if (state == STANDBY || state == FINISHED) {
     enterSetting(0);                             // 最初の設定 (MAKEUP) へ
@@ -740,7 +744,7 @@ void loop() {
   static bool longFiredB = false;
   if (M5.BtnB.isPressed() && !longFiredB && M5.BtnB.pressedFor(LONG_PRESS_MS)) {
     longFiredB = true;
-    keyReset();                           // B長押し = 中断中に待機へ戻す
+    keyReset(now);                        // B長押し = 中断 / 待機へ戻す / 設定画面
   }
   if (M5.BtnB.wasReleased()) {
     if (!longFiredB) keyEnter(now);       // B短押し = 繰り返し回数 / 中断
