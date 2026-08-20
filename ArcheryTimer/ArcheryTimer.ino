@@ -8,9 +8,10 @@
  *   開始前 --[A]--> ムーブアップ 10秒(赤) --> 行射 180秒(緑 / 残り30秒で黄)
  *          --> (次の立 または 行射終了)
  *
- * 行射終了(FINISHED)からボタンBを長押しすると、補充矢・シュートオフ用の
- * メイクアップモードに入ります。ボタンBで行射時間を選び、ボタンAを押すと
- * 10秒のムーブアップ + 選んだ行射 を1回だけ行って、もとの設定に戻ります。
+ * 待機(STANDBY)または行射終了(FINISHED)からボタンBを長押しすると、補充矢・
+ * シュートオフ用のメイクアップモード(画面は黒)に入ります。ボタンBで行射時間を
+ * 選び、ボタンAを押すと 10秒のムーブアップ(赤) + 選んだ行射 を1回だけ行って、
+ * もとの設定に戻ります。
  *
  * 通信は仕様どおり固定:
  *   EIA RS-485準拠 / 半二重 / 調歩同期 / 9600bps / スタート1 / データ8 / パリティ無 / ストップ1
@@ -19,7 +20,7 @@
  *   ボタンA 短押し  = Space  開始 / 再開
  *   ボタンA 長押し  = 右矢印 早送り (この立を終わりにして次へ)
  *   ボタンB 短押し  = Enter  中断 (5声)
- *   ボタンB 長押し  = —      中断中に待機へ戻す / 行射終了からメイクアップ
+ *   ボタンB 長押し  = —      中断中に待機へ戻す / 待機・行射終了からメイクアップ
  */
 
 // M5StickC Plus を使う場合は include を入れ替えてください
@@ -35,8 +36,8 @@ static const uint16_t WARN_SEC     = 30;   // 行射残りこの秒数から黄�
 static const uint16_t REPEAT_DEFAULT = 1;
 static const uint16_t REPEAT_MAX     = 4;  // ボタンBで回せる上限 (この次が ∞)
 
-// 補充矢・シュートオフ用の「メイクアップ」の行射時間 [秒]。行射終了(FINISHED)で
-// ボタンBを長押しすると入り、そこでボタンBを押すたびにこの表を順に回る。
+// 補充矢・シュートオフ用の「メイクアップ」の行射時間 [秒]。待機(STANDBY)または
+// 行射終了(FINISHED)でボタンBを長押しすると入り、ボタンBを押すたびにこの表を順に回る。
 // 最後まで行くと先頭に戻る。
 static const uint16_t MAKEUP_SEC_TABLE[] = {20, 30, 40, 60, 80, 90, 100, 120, 150, 160};
 static const uint8_t  MAKEUP_SEC_COUNT   =
@@ -224,7 +225,8 @@ static bool     running     = false;  // false = 停止中
 // 補充矢・シュートオフを1立だけ行うモード。ムーブアップ+行射が終わると解除され、
 // 繰り返し回数などのもとの設定に戻る。
 static bool     makeupMode  = false;
-static uint8_t  makeupIndex = 0;      // MAKEUP_SEC_TABLE の位置
+static uint8_t  makeupIndex = 0;         // MAKEUP_SEC_TABLE の位置
+static State    makeupFrom  = STANDBY;   // メイクアップに入る前の状態 (やめたときの戻り先)
 
 static uint32_t beepAnchor  = 0;
 static uint8_t  beepCount   = 0;
@@ -343,9 +345,10 @@ static void resetToStandby() {
   silence();
 }
 
-// 行射終了から、補充矢・シュートオフのメイクアップ待機に入る。無音。
+// 待機または行射終了から、補充矢・シュートオフのメイクアップ待機に入る。無音。
 // 中央には選んでいる行射時間が出るので、そのまま設定の表示になる。
 static void enterMakeup() {
+  makeupFrom  = state;
   makeupMode  = true;
   state       = MAKEUP_STANDBY;
   durationSec = makeupSec();
@@ -354,11 +357,11 @@ static void enterMakeup() {
   silence();
 }
 
-// メイクアップをやめて行射終了に戻す。無音。
+// メイクアップをやめて、入る前の状態(待機 または 行射終了)に戻す。無音。
 static void exitMakeup() {
   makeupMode  = false;
-  state       = FINISHED;
-  durationSec = 0;
+  state       = makeupFrom;
+  durationSec = (makeupFrom == STANDBY) ? MOVEUP_SEC : 0;
   elapsedMs   = 0;
   running     = false;
   silence();
@@ -419,8 +422,8 @@ static void keyEnter(uint32_t now) {   // ボタンB 短押し = 繰り返し回
 
 static void keyReset() {               // ボタンB 長押し = 待機へ戻す / メイクアップ
   if (state == HALT_MOVEUP || state == HALT_SHOOTING) resetToStandby();
-  else if (state == FINISHED)       enterMakeup();  // 補充矢・シュートオフへ
-  else if (state == MAKEUP_STANDBY) exitMakeup();   // やめて行射終了へ戻る
+  else if (state == STANDBY || state == FINISHED) enterMakeup();  // 補充矢・シュートオフへ
+  else if (state == MAKEUP_STANDBY) exitMakeup();                 // やめて元へ戻る
 }
 
 // 時間切れで自動的に次の状態へ進んでいないか確認する。
@@ -444,6 +447,8 @@ static int16_t W = 160, H = 80;
 static const uint16_t COLOR_RED    = 0xF800;  // #FF0000
 static const uint16_t COLOR_GREEN  = 0x04A8;  // #009946
 static const uint16_t COLOR_YELLOW = 0xFFE0;  // #FFFF00
+// メイクアップ待機だけは黒地。通常の待機(赤)と一目で区別できるようにするため。
+static const uint16_t COLOR_BLACK  = 0x0000;  // #000000
 
 // 上段(状態・立)と下段(バー)の高さ。中央の数字はその残りに収める。
 static const int16_t TOP_H = 18;
@@ -549,8 +554,10 @@ static void drawMakeupTag(uint16_t fg, uint16_t bg) {
   spr.drawString("MAKEUP", W - 4, 4, 1);
 }
 
-// 信号の色。行射だけが緑/黄で、それ以外は赤。
+// 信号の色。行射だけが緑/黄、メイクアップ待機だけが黒で、それ以外は赤。
+// メイクアップでもスタートすればムーブアップは赤に戻る。
 static uint16_t signalColor(uint32_t now) {
+  if (state == MAKEUP_STANDBY) return COLOR_BLACK;
   if (state == SHOOTING) {
     return (remainingSec(now) <= WARN_SEC) ? COLOR_YELLOW : COLOR_GREEN;
   }
