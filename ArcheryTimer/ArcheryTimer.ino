@@ -61,8 +61,8 @@ static const uint8_t  BUZZER_KIND_SEL = 1;
 
 // M5StickC 本体側でも鳴らす場合のピン。-1 で鳴らさない。
 //   M5StickC Plus : 内蔵ブザーが G2 にあるので 2 を指定する
-//   無印 M5StickC : 内蔵ブザーは無い。RS-485 HAT で HAT 端子が埋まっているうえ、
-//                   G26 は送信に使っているので、鳴らすなら別のピンに繋ぐ
+//   無印 M5StickC : 内蔵ブザーは無い。RS-485 HAT で HAT 端子 (G0/G26) が
+//                   埋まっているので、鳴らすなら別のピンに繋ぐ
 // UD0040 のブザーは、この設定とは無関係に BUZZER_KIND_SEL で鳴る。
 static const int      BUZZER_PIN  = -1;
 static const uint16_t BUZZER_FREQ = 2000;
@@ -74,10 +74,11 @@ static const uint8_t  SCREEN_ROTATION = 1;   // 3 または 1 で横向き（上
 static const uint8_t  SCREEN_BRIGHT   = 100;
 static const uint32_t LONG_PRESS_MS   = 800; // 長押しの判定時間
 
-// RS-485 HAT の接続先 (M5StickC の底面 HAT 端子)。G36 は入力専用なので、
-// 送信は必ず G26 側になる。Grove の RS-485 ユニットを使う場合は 33 / 32 にする。
-static const int  RS485_RX_PIN = 36;   // 受信。このプログラムでは使わない
-static const int  RS485_TX_PIN = 26;   // 送信
+// RS-485 HAT の接続先 (M5StickC の底面 HAT 端子)。M5StickC ライブラリの
+// examples/Hat/RS485 と同じ割り当て (Serial2.begin(..., 26, 0))。
+// Grove の RS-485 ユニットを使う場合は 33 / 32 にする。
+static const int  RS485_RX_PIN = 26;   // 受信。このプログラムでは使わない
+static const int  RS485_TX_PIN = 0;    // 送信
 static const long RS485_BAUD   = 9600;
 #define RS485 Serial2
 
