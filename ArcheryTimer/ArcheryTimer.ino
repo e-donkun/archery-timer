@@ -168,11 +168,13 @@ static void sendBuzzer(uint8_t kind) {
 }
 
 // 送信開始の宣言フレーム。02 30 45 30 30 30 31 03 37 37
+// タイマーはこれを受け取るまで受信モードにならないので、起動時だけでなく
+// 表示が変わるたびに出す。途中でケーブルが抜けても、挿し直せば次の表示の
+// 変わり目で受信モードに戻る。
 static void sendInit() {
   const uint8_t body[3] = {CMD_INIT, 0x00, 0x01};
   uint8_t frame[10];
   RS485.write(frame, buildFrame(body, sizeof(body), frame));
-  RS485.flush();
 }
 
 // ============================================================ 本体ブザー
@@ -724,6 +726,7 @@ void setup() {
 
   RS485.begin(RS485_BAUD, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
   sendInit();
+  RS485.flush();
 
   resetToStandby();
 }
@@ -770,6 +773,14 @@ void loop() {
     nextFrameMs = now + FRAME_INTERVAL_MS;
     if (BUZZER_KIND_SEL != 0 && beepActiveAt(now)) {
       sendBuzzer(BUZZER_KIND_SEL == 1 ? 0x01 : 0x00);  // 表示の合間にブザーを挟む
+    }
+    // 表示が変わるときは、その前に必ず送信開始の宣言を出す。ケーブルが抜けて
+    // 挿し直されても、これでタイマーが受信モードに戻る。
+    const uint32_t shown = blank ? 0x10000UL : value;   // 消灯も別の「表示」として見る
+    static uint32_t lastShown = 0xFFFFFFFFUL;
+    if (shown != lastShown) {
+      lastShown = shown;
+      sendInit();
     }
     sendDisplay(value, blank);
   }
