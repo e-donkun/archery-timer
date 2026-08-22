@@ -95,7 +95,8 @@ static const uint8_t CMD_INIT    = 0x0E;
 static const uint8_t DIGITS         = 7;     // プロトコル上の桁数（実機が持つのは右5桁）
 static const uint8_t SEPARATOR_MODE = 0x02;  // 本体[8] 区切り(コロン)を使う時間表示
 
-static const uint32_t FRAME_INTERVAL_MS = 85;  // 実機の送信周期
+static const uint32_t FRAME_INTERVAL_MS = 85;    // 実機の送信周期
+static const uint32_t INIT_RESEND_MS    = 1000;  // 送信開始の宣言を出し直す間隔
 
 static const char HEX_CHARS[] = "0123456789ABCDEF";
 
@@ -169,8 +170,8 @@ static void sendBuzzer(uint8_t kind) {
 
 // 送信開始の宣言フレーム。02 30 45 30 30 30 31 03 37 37
 // タイマーはこれを受け取るまで受信モードにならないので、起動時だけでなく
-// 表示が変わるたびに出す。途中でケーブルが抜けても、挿し直せば次の表示の
-// 変わり目で受信モードに戻る。
+// 表示が変わるたびと INIT_RESEND_MS ごとに出す。途中でケーブルが抜けても、
+// 挿し直せば1秒以内に受信モードに戻る。
 static void sendInit() {
   const uint8_t body[3] = {CMD_INIT, 0x00, 0x01};
   uint8_t frame[10];
@@ -774,12 +775,14 @@ void loop() {
     if (BUZZER_KIND_SEL != 0 && beepActiveAt(now)) {
       sendBuzzer(BUZZER_KIND_SEL == 1 ? 0x01 : 0x00);  // 表示の合間にブザーを挟む
     }
-    // 表示が変わるときは、その前に必ず送信開始の宣言を出す。ケーブルが抜けて
-    // 挿し直されても、これでタイマーが受信モードに戻る。
+    // 表示が変わるときと、表示が止まっていても1秒ごとに、送信開始の宣言を
+    // 出す。ケーブルが抜けて挿し直されても、これでタイマーが受信モードに戻る。
     const uint32_t shown = blank ? 0x10000UL : value;   // 消灯も別の「表示」として見る
-    static uint32_t lastShown = 0xFFFFFFFFUL;
-    if (shown != lastShown) {
-      lastShown = shown;
+    static uint32_t lastShown  = 0xFFFFFFFFUL;
+    static uint32_t nextInitMs = 0;
+    if (shown != lastShown || (int32_t)(now - nextInitMs) >= 0) {
+      lastShown  = shown;
+      nextInitMs = now + INIT_RESEND_MS;
       sendInit();
     }
     sendDisplay(value, blank);
