@@ -436,11 +436,18 @@ static void keySpace(uint32_t now) {   // ボタンA 短押し
   }
 }
 
-// ボタンA 長押し。ムーブアップ・行射中だけ早送り。設定画面は初期画面へ戻る。
+// ボタンA 長押し。ムーブアップ・行射中は早送り、中断中は行射終了へ。
+// 設定画面は初期画面へ戻る。それ以外は短押しと同じ。
 static void keyRight(uint32_t now) {
-  if (state == MOVEUP || state == SHOOTING) completeRound(now);  // この立を終わりにして次へ
-  else if (state == SETTING)                toReady();           // 設定をやめて初期画面へ
-  else                                      keySpace(now);
+  if (state == MOVEUP || state == SHOOTING) {
+    completeRound(now);            // この立を終わりにして次へ
+  } else if (state == HALT_MOVEUP || state == HALT_SHOOTING) {
+    finish(now);                   // 中断したところで行射終了にする (3声)
+  } else if (state == SETTING) {
+    toReady();                     // 設定をやめて初期画面へ
+  } else {
+    keySpace(now);
+  }
 }
 
 // 行射中・ムーブアップ中を中断して止める (5声)。それ以外の状態では何も起きない。
