@@ -61,6 +61,11 @@ static const uint8_t MODE_COUNT = sizeof(MODES) / sizeof(MODES[0]);
 // UD0040 のブザー音色: 1 = ブザー1 (0x01) / 2 = ブザー2 (0x00) / 0 = 鳴らさない
 static const uint8_t  BUZZER_KIND_SEL = 1;
 
+// 本体の赤色LED。合図(ブザー)が鳴っている間だけ点ける。M5StickC / Plus とも
+// G10 で、LOW を出すと点灯する。-1 にすると使わない。
+static const int      LED_PIN    = 10;
+static const uint8_t  LED_ON     = LOW;
+
 // M5StickC 本体側でも鳴らす場合のピン。-1 で鳴らさない。
 //   M5StickC Plus : 内蔵ブザーが G2 にあるので 2 を指定する
 //   無印 M5StickC : 内蔵ブザーは無い。RS-485 HAT で HAT 端子 (G0/G26) が
@@ -213,6 +218,18 @@ static void buzzerOff() {
 }
 
 #endif
+
+// 赤色LED。ブザーと同じタイミングで点け消しする。
+static void ledBegin() {
+  if (LED_PIN < 0) return;
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, (LED_ON == LOW) ? HIGH : LOW);   // 消灯
+}
+
+static void ledSet(bool on) {
+  if (LED_PIN < 0) return;
+  digitalWrite(LED_PIN, on ? LED_ON : ((LED_ON == LOW) ? HIGH : LOW));
+}
 
 // ============================================================ 合図(ブザー)
 // 「0.7秒鳴動 -> 0.3秒インターバル」を count 回。回数だけ場面ごとに違う。
@@ -529,13 +546,14 @@ static const char* stateLabel() {
 }
 
 // 右下に出す、ボタンAを押したときの行き先。無ければ nullptr。
-static const char* keyHintA() {
+static const char* keyHintA(uint32_t now) {
   switch (state) {
     case SETTING:       return "READY";    // 開始待ちへ
     case READY:         return "MV UP";    // ムーブアップ開始
     case HALT_MOVEUP:   return "READY";    // 開始待ちへ戻る
     case HALT_SHOOTING: return "Resume";   // 止めたところから再開
-    case FINISHED:      return "READY";    // 開始待ちへ
+    case FINISHED:      // 0 の点滅が終わってから出す
+      return beepBlinkWindow(now) ? nullptr : "READY";
     default:            return nullptr;    // ムーブアップ・行射中は出さない
   }
 }
@@ -698,7 +716,7 @@ static void render(uint32_t now, uint16_t value, bool blank) {
   spr.fillSprite(bg);
   spr.setTextColor(fg, bg);
 
-  const char* const hint = keyHintA();   // 右下に出すボタンAの行き先
+  const char* const hint = keyHintA(now);   // 右下に出すボタンAの行き先
 
   if (state == SETTING) {
     drawSettingScreen(fg, bg);
@@ -718,7 +736,7 @@ static void render(uint32_t now, uint16_t value, bool blank) {
       spr.drawString(label, 4, 4, 1);
     }
 
-    // 中央: 残り秒数。右下にボタンがあるときは、そのぶん左に寄せて重なりを避ける
+    // 中央: 残り秒数。位置は右下のボタンの有無で変わらないようにする
     const int16_t hintW = hintWidth(hint);
     if (!blank) {
       char text[8];
@@ -726,7 +744,7 @@ static void render(uint32_t now, uint16_t value, bool blank) {
       spr.setTextColor(fg, bg);
       spr.setTextDatum(MC_DATUM);
       spr.setTextSize(bigSize);
-      spr.drawString(text, (W - hintW) / 2, TOP_H + bandH / 2, bigFont);
+      spr.drawString(text, W / 2, TOP_H + bandH / 2, bigFont);
       spr.setTextSize(1);
     }
 
@@ -765,6 +783,7 @@ void setup() {
   spr.createSprite(W, H);
 
   buzzerBegin();
+  ledBegin();
 
   RS485.begin(RS485_BAUD, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
   sendInit();
@@ -830,13 +849,14 @@ void loop() {
     sendDisplay(value, blank);
   }
 
-  // --- 本体側のブザー (BUZZER_PIN < 0 なら何もしない) ---
+  // --- 本体側のブザーと赤色LED (画面に出す白枠と同じタイミング) ---
   {
     static bool toneOn = false;
     const bool want = beepActiveAt(now);
     if (want != toneOn) {
       toneOn = want;
       if (want) buzzerOn(); else buzzerOff();
+      ledSet(want);
     }
   }
 
