@@ -5,24 +5,23 @@
  * モルテン ハンディータイマーアウトドア UD0040 を RS-485 で駆動しつつ、
  * M5StickC の画面（横向き）にも同じ内容を信号色つきで表示します。
  *
- *   開始前 --[A]--> ムーブアップ 10秒(赤) --> 行射 180秒(緑 / 残り30秒で黄)
- *          --> (次の立 または 行射終了)
+ *   設定 --[A]--> 開始待ち --[A]--> ムーブアップ 10秒(赤)
+ *        --> 行射(緑 / 残り30秒で黄) --> (次の立 または 行射終了)
  *
- * 待機(STANDBY)または行射終了(FINISHED)からボタンBを長押しすると、補充矢・
- * シュートオフの設定画面(画面は黒)に入ります。長押しするたびに
- *   Setting - MAKEUP -> Setting - SHOOTOFF -> STANDBY -> Setting - MAKEUP -> ...
- * と回り、設定画面でボタンBを短押しすると行射時間が切り替わります。
- * ボタンAを押すと 10秒のムーブアップ(赤) + 選んだ行射 を1回だけ行って、
- * もとの設定に戻ります。
+ * 設定画面(黒)は3つあり、ボタンBの長押しで
+ *   Shooting Time -> MAKEUP -> Shoot Off -> Shooting Time -> ...
+ * と回ります。ボタンBの短押しでその設定の行射時間を選び、ボタンAで開始待ち
+ * (READY)へ。開始待ちではボタンBで繰り返す「立」の数を決められます。
+ * 中断・行射終了からボタンBを長押しすると、設定画面の先頭に戻ります。
  *
  * 通信は仕様どおり固定:
  *   EIA RS-485準拠 / 半二重 / 調歩同期 / 9600bps / スタート1 / データ8 / パリティ無 / ストップ1
  *
  * 操作 (Python版のキー割り当てに対応):
- *   ボタンA 短押し  = Space  開始 / 再開
- *   ボタンA 長押し  = 右矢印 早送り (この立を終わりにして次へ)
- *   ボタンB 短押し  = Enter  中断 (5声)
- *   ボタンB 長押し  = —      中断 (5声) / 中断中に待機へ戻す / 設定画面を回す
+ *   ボタンA 短押し  = Space  次へ (設定->開始待ち->ムーブアップ) / 再開
+ *   ボタンA 長押し  = 右矢印 早送り (この立を終わりにして次へ)。他は短押しと同じ
+ *   ボタンB 短押し  = Enter  行射時間 / 繰り返し回数 / 中断 (5声)
+ *   ボタンB 長押し  = —      設定を回す / 中断 (5声) / 設定画面へ戻る
  */
 
 // M5StickC Plus を使う場合は include を入れ替えてください
@@ -31,30 +30,32 @@
 
 // ============================================================ 設定
 static const uint16_t MOVEUP_SEC   = 10;   // ムーブアップ（準備）時間 [秒]
-static const uint16_t SHOOTING_SEC = 180;  // 行射時間 [秒]
 static const uint16_t WARN_SEC     = 30;   // 行射残りこの秒数から黄色 [秒]
 // 繰り返す「立」の数。0 は無制限(∞)。STANDBY 中にボタンBで
 // 1 -> 2 -> 3 -> 4 -> ∞ -> 1 と切り替えられるので、ここは起動時の値。
 static const uint16_t REPEAT_DEFAULT = 1;
 static const uint16_t REPEAT_MAX     = 4;  // ボタンBで回せる上限 (この次が ∞)
 
-// 補充矢(メイクアップ)とシュートオフの行射時間 [秒]。設定画面でボタンBを短押しする
-// たびに、その設定の表を順に回る。最後まで行くと先頭に戻る。
+// 行射時間 [秒]。設定画面でボタンBを短押しするたびに、その設定の表を順に回る。
+// 最後まで行くと先頭に戻る。先頭が起動時の値。
+static const uint16_t SHOOTING_SEC_TABLE[] = {180, 240, 120, 90, 60, 40};
 static const uint16_t MAKEUP_SEC_TABLE[]   = {30, 40, 60, 80, 90, 100, 120, 150, 160, 20};
 static const uint16_t SHOOTOFF_SEC_TABLE[] = {20, 30, 40, 60};
 
-// 設定画面。ボタンB長押しで、この順に切り替えたあと待機(STANDBY)に戻る。
-struct MakeupPreset {
-  const char*     name;   // 上段左に "Setting - " に続けて出す名前
+// 3つの設定。設定画面でボタンBを長押しすると、この順に切り替わって先頭に戻る。
+struct Mode {
+  const char*     title;  // 設定画面に出す名前
+  const char*     name;   // 開始待ち(READY)に出す短い名前
   const uint16_t* table;  // 行射時間の表 [秒]
   uint8_t         count;
 };
-static const MakeupPreset MAKEUP_PRESETS[] = {
-  {"MAKEUP",   MAKEUP_SEC_TABLE,   sizeof(MAKEUP_SEC_TABLE)   / sizeof(MAKEUP_SEC_TABLE[0])},
-  {"SHOOTOFF", SHOOTOFF_SEC_TABLE, sizeof(SHOOTOFF_SEC_TABLE) / sizeof(SHOOTOFF_SEC_TABLE[0])},
+#define MODE_TABLE(t) t, sizeof(t) / sizeof(t[0])
+static const Mode MODES[] = {
+  {"Shooting Time", "Shooting",  MODE_TABLE(SHOOTING_SEC_TABLE)},
+  {"MAKEUP",        "Makeup",    MODE_TABLE(MAKEUP_SEC_TABLE)},
+  {"Shoot Off",     "Shoot Off", MODE_TABLE(SHOOTOFF_SEC_TABLE)},
 };
-static const uint8_t MAKEUP_PRESET_COUNT =
-    sizeof(MAKEUP_PRESETS) / sizeof(MAKEUP_PRESETS[0]);
+static const uint8_t MODE_COUNT = sizeof(MODES) / sizeof(MODES[0]);
 
 // UD0040 のブザー音色: 1 = ブザー1 (0x01) / 2 = ブザー2 (0x00) / 0 = 鳴らさない
 static const uint8_t  BUZZER_KIND_SEL = 1;
@@ -224,8 +225,8 @@ static const uint8_t BUZZER_ALARM  = 5;  // ボタンBによる中断
 
 // ============================================================ 状態機械
 enum State : uint8_t {
-  STANDBY,        // 待機（ここで繰り返し回数を設定できる）
-  MAKEUP_SETTING, // 設定画面（補充矢・シュートオフの行射時間を選ぶ）
+  SETTING,        // 設定画面（Shooting Time / MAKEUP / Shoot Off の行射時間を選ぶ）
+  READY,          // 開始待ち（ここで繰り返し回数を設定できる）
   MOVEUP,         // ムーブアップ
   SHOOTING,       // 行射
   HALT_MOVEUP,    // 中断（ムーブアップ中）
@@ -233,7 +234,7 @@ enum State : uint8_t {
   FINISHED        // 行射終了
 };
 
-static State    state       = STANDBY;
+static State    state       = SETTING;
 static uint16_t roundNo     = 1;
 static uint16_t repeatCount = REPEAT_DEFAULT;  // 0 = ∞
 static uint16_t durationSec = MOVEUP_SEC;
@@ -241,30 +242,23 @@ static uint32_t elapsedMs   = 0;      // 停止中はここに固定される
 static uint32_t runOrigin   = 0;
 static bool     running     = false;  // false = 停止中
 
-// 補充矢・シュートオフを1立だけ行うモード。ムーブアップ+行射が終わると解除され、
-// 繰り返し回数などのもとの設定に戻る。
-static bool     makeupMode  = false;
-static uint8_t  presetNo    = 0;         // MAKEUP_PRESETS の位置 (0=MAKEUP, 1=SHOOTOFF)
-static uint8_t  presetIndex[MAKEUP_PRESET_COUNT] = {0};  // 設定ごとに選んでいる秒数の位置
+// 選んでいる設定と、設定ごとに選んでいる行射時間の位置。
+static uint8_t  modeNo    = 0;              // MODES の位置 (0=Shooting Time)
+static uint8_t  modeIndex[MODE_COUNT] = {0};
 
 static uint32_t beepAnchor  = 0;
 static uint8_t  beepCount   = 0;
 static bool     beepBlink   = false;
 static bool     beepArmed   = false;
 
-// 今の設定 (MAKEUP か SHOOTOFF)。
-static const MakeupPreset& preset() {
-  return MAKEUP_PRESETS[presetNo];
+// 今の設定 (Shooting Time / MAKEUP / Shoot Off)。
+static const Mode& mode() {
+  return MODES[modeNo];
 }
 
-// 今選んでいる補充矢・シュートオフの行射時間。
-static uint16_t makeupSec() {
-  return preset().table[presetIndex[presetNo]];
-}
-
-// この立の行射時間。メイクアップ中だけ選んだ時間になる。
+// 今の設定で選んでいる行射時間。そのまま「この立の行射時間」になる。
 static uint16_t shootingSec() {
-  return makeupMode ? makeupSec() : SHOOTING_SEC;
+  return mode().table[modeIndex[modeNo]];
 }
 
 static uint32_t currentElapsedMs(uint32_t now) {
@@ -345,11 +339,6 @@ static void finish(uint32_t now) {
 
 // ムーブアップ+行射の1ラウンド(「立」)が終わった。早送りでも自然終了でも同じ処理。
 static void completeRound(uint32_t now) {
-  if (makeupMode) {      // メイクアップは1立だけ。終わったらもとの設定に戻る
-    makeupMode = false;
-    finish(now);         // 3声
-    return;
-  }
   if (repeatCount == 0 || roundNo < repeatCount) {
     if (roundNo < 0xFFFF) roundNo++;   // ∞ のときに一周しないようにする
     startMoveup(now);  // 2声
@@ -358,12 +347,12 @@ static void completeRound(uint32_t now) {
   }
 }
 
-// 待機に戻す。繰り返し回数の設定はそのまま残す。
-static void resetToStandby() {
-  roundNo     = 1;
-  makeupMode  = false;
-  state       = STANDBY;
-  durationSec = MOVEUP_SEC;
+// 開始待ちに戻す。設定(行射時間・繰り返し回数)はそのまま残す。無音。
+// keepRound = true なら「立」の番号をそのままにする (中断からの復帰)。
+static void toReady(bool keepRound = false) {
+  if (!keepRound) roundNo = 1;
+  state       = READY;
+  durationSec = MOVEUP_SEC;   // 中央にはムーブアップの秒数が出る
   elapsedMs   = 0;
   running     = false;
   silence();
@@ -371,23 +360,27 @@ static void resetToStandby() {
 
 // no 番目の設定画面に入る（切り替えも同じ）。無音。
 // 中央には選んでいる行射時間が出るので、そのまま設定の表示になる。
-static void enterSetting(uint8_t no) {
-  presetNo    = no;
-  makeupMode  = true;
-  state       = MAKEUP_SETTING;
-  durationSec = makeupSec();
+static void toSetting(uint8_t no) {
+  modeNo      = no;
+  roundNo     = 1;
+  state       = SETTING;
+  durationSec = shootingSec();
   elapsedMs   = 0;
   running     = false;
   silence();
 }
 
 // 選んでいる設定の行射時間を、その表の順に回す。
-// MAKEUP は 20 -> 30 -> ... -> 160 -> 20、SHOOTOFF は 30 -> 40 -> 20 -> 30。
-static void cycleMakeupSec() {
-  uint8_t& idx = presetIndex[presetNo];
-  idx = (uint8_t)((idx + 1) % preset().count);
-  durationSec = makeupSec();
+static void cycleShootingSec() {
+  uint8_t& idx = modeIndex[modeNo];
+  idx = (uint8_t)((idx + 1) % mode().count);
+  durationSec = shootingSec();
   elapsedMs   = 0;
+}
+
+// 設定を Shooting Time -> MAKEUP -> Shoot Off -> Shooting Time と回す。
+static void cycleMode() {
+  toSetting((uint8_t)((modeNo + 1) % MODE_COUNT));
 }
 
 // 繰り返し回数を 1 -> 2 -> 3 -> 4 -> ∞ -> 1 と回す。
@@ -398,24 +391,21 @@ static void cycleRepeat() {
 }
 
 // --- ボタン操作 (対応する状態以外では何も起きない) ---
-static void keySpace(uint32_t now) {   // ボタンA 短押し = 開始 / 再開
+static void keySpace(uint32_t now) {   // ボタンA 短押し
   switch (state) {
-    case STANDBY:                                              // 2声
-    case MAKEUP_SETTING: startMoveup(now); break;               // 10秒のムーブアップから
-    case HALT_MOVEUP:                                          // 無音。ここでリセット
-      // メイクアップ中は、もとの待機ではなくメイクアップ待機に戻す
-      state       = makeupMode ? MAKEUP_SETTING : STANDBY;
-      durationSec = makeupMode ? makeupSec() : MOVEUP_SEC;
-      elapsedMs   = 0;
-      break;
-    case HALT_SHOOTING: startShooting(now, true); break;       // 1声
-    case FINISHED:      resetToStandby(); break;               // 無音
+    case SETTING:       toReady(); break;                      // 無音。開始待ちへ
+    case READY:         startMoveup(now); break;               // 2声。10秒のムーブアップから
+    case HALT_MOVEUP:   toReady(true); break;                  // 無音。開始待ちへ戻る
+    case HALT_SHOOTING: startShooting(now, true); break;       // 1声。止めたところから再開
+    case FINISHED:      toReady(); break;                      // 無音。開始待ちへ
     default: break;
   }
 }
 
-static void keyRight(uint32_t now) {   // ボタンA 長押し = 早送り
-  if (state == MOVEUP || state == SHOOTING) completeRound(now);
+// ボタンA 長押し。ムーブアップ・行射中だけ早送りで、あとは短押しと同じ。
+static void keyRight(uint32_t now) {
+  if (state == MOVEUP || state == SHOOTING) completeRound(now);  // この立を終わりにして次へ
+  else                                      keySpace(now);
 }
 
 // 行射中・ムーブアップ中を中断して止める (5声)。それ以外の状態では何も起きない。
@@ -428,29 +418,22 @@ static void keyHalt(uint32_t now) {
   triggerBeep(BUZZER_ALARM, now);  // 5声
 }
 
-static void keyEnter(uint32_t now) {   // ボタンB 短押し = 繰り返し回数 / 行射時間 / 中断
-  if (state == STANDBY) {
-    cycleRepeat();                   // 無音。待機中だけ回数を設定できる
-  } else if (state == MAKEUP_SETTING) {
-    cycleMakeupSec();                // 無音。設定画面では行射時間を選ぶ
+static void keyEnter(uint32_t now) {   // ボタンB 短押し = 行射時間 / 繰り返し回数 / 中断
+  if (state == SETTING) {
+    cycleShootingSec();              // 無音。設定画面では行射時間を選ぶ
+  } else if (state == READY) {
+    cycleRepeat();                   // 無音。開始待ちでは繰り返し回数を選ぶ
   } else {
     keyHalt(now);                    // ムーブアップ・行射中なら中断 (5声)
   }
 }
 
-// ボタンB 長押し = ムーブアップ・行射中は中断 (短押しと同じ)。中断中は待機へ戻す。
-// それ以外は設定画面を Setting - MAKEUP -> Setting - SHOOTOFF -> STANDBY -> ... と回す。
+// ボタンB 長押し = 設定画面では次の設定へ。ムーブアップ・行射中は中断 (短押しと同じ)。
+// それ以外 (開始待ち・中断中・行射終了) は設定画面の先頭 (Shooting Time) へ。
 static void keyReset(uint32_t now) {
-  if (state == MOVEUP || state == SHOOTING) {
-    keyHalt(now);                                // 中断 (5声)
-  } else if (state == HALT_MOVEUP || state == HALT_SHOOTING) {
-    resetToStandby();
-  } else if (state == STANDBY || state == FINISHED) {
-    enterSetting(0);                             // 最初の設定 (MAKEUP) へ
-  } else if (state == MAKEUP_SETTING) {
-    if (presetNo + 1 < MAKEUP_PRESET_COUNT) enterSetting(presetNo + 1);  // 次の設定へ
-    else                                    resetToStandby();            // 一周したら待機へ
-  }
+  if (state == SETTING)                     cycleMode();   // 次の設定へ (一周する)
+  else if (state == MOVEUP || state == SHOOTING) keyHalt(now);  // 中断 (5声)
+  else                                      toSetting(0);  // Shooting Time の設定へ
 }
 
 // 時間切れで自動的に次の状態へ進んでいないか確認する。
@@ -495,13 +478,13 @@ static const FontChoice FONT_CANDIDATES[] = {
 static uint8_t  bigFont  = 7;
 static uint8_t  bigSize  = 1;
 static uint16_t sizedFor = 0xFFFF;  // このフォントを選んだときの基準値
+static int16_t  sizedH   = -1;      // このフォントを選んだときの中央の帯の高さ
 
 // maxValue を表示しても中央の帯に収まる、いちばん大きなフォントを選ぶ。
 // フェーズごとに一度だけ決めるので、桁が減っても数字の大きさは変わらない。
-static void chooseFont(uint16_t maxValue) {
+static void chooseFont(uint16_t maxValue, int16_t availH) {
   char text[8];
   snprintf(text, sizeof(text), "%u", (unsigned)maxValue);
-  const int16_t availH = H - TOP_H - BOTTOM_H;
 
   bigFont = 2;
   bigSize = 1;
@@ -523,17 +506,26 @@ static void chooseFont(uint16_t maxValue) {
 }
 
 static const char* stateLabel() {
-  static char buf[24];
   switch (state) {
-    case STANDBY:       return "STANDBY";    // 待機
-    case MAKEUP_SETTING:                     // 設定画面 (Setting - MAKEUP など)
-      snprintf(buf, sizeof(buf), "Setting - %s", preset().name);
-      return buf;
-    case MOVEUP:        return "MOVE UP";    // ムーブアップ
-    case SHOOTING:      return "SHOOTING";   // 行射
+    case SETTING:       return mode().title;  // Shooting Time / MAKEUP / Shoot Off
+    case READY:         return "READY";       // 開始待ち
+    case MOVEUP:        return "MOVE UP";     // ムーブアップ
+    case SHOOTING:      return "SHOOTING";    // 行射
     case HALT_MOVEUP:
-    case HALT_SHOOTING: return "HALT";       // 中断
-    default:            return "FINISHED";   // 行射終了
+    case HALT_SHOOTING: return "HALT";        // 中断
+    default:            return "FINISHED";    // 行射終了
+  }
+}
+
+// 右端に縦書きで出す、ボタンAを押したときの行き先。無ければ nullptr。
+static const char* keyHintA() {
+  switch (state) {
+    case SETTING:       return "READY";    // 開始待ちへ
+    case READY:         return "MV UP";    // ムーブアップ開始
+    case HALT_MOVEUP:   return "READY";    // 開始待ちへ戻る
+    case HALT_SHOOTING: return "Resume";   // 止めたところから再開
+    case FINISHED:      return "READY";    // 開始待ちへ
+    default:            return nullptr;    // ムーブアップ・行射中は出さない
   }
 }
 
@@ -552,9 +544,9 @@ static void drawInfinity(int16_t rightX, uint16_t color) {
 }
 
 // 上段右の「立」。分母は繰り返し回数で、0 のときは ∞ を描く。
-// 待機中は設定できることが分かるように分母だけ点滅させる。
-static void drawRounds(uint32_t now, uint16_t fg, uint16_t bg) {
-  const bool hideDen = (state == STANDBY) && ((now / 400) % 2 == 1);
+// 開始待ちでは設定できることが分かるように分母だけ点滅させる。
+static int16_t drawRounds(uint32_t now, uint16_t fg, uint16_t bg) {
+  const bool hideDen = (state == READY) && ((now / 400) % 2 == 1);
 
   spr.setTextColor(fg, bg);
   spr.setTextDatum(TR_DATUM);
@@ -573,77 +565,81 @@ static void drawRounds(uint32_t now, uint16_t fg, uint16_t bg) {
   char num[12];
   snprintf(num, sizeof(num), "%u/", (unsigned)roundNo);
   spr.drawString(num, x, 0, 2);
+  return (W - 4) - (x - spr.textWidth(num, 2));   // 描いた幅
 }
 
-// 補充矢・シュートオフの行射中に、上段右へ「立」の代わりに出す名前と設定秒数。
-// 例: MAKEUP(30s) / SHOOTOFF(40s)。設定画面は上段左がそのまま Setting - ... なので
-// 出さない。出すものがあれば true。
-static bool makeupTagText(char* buf, size_t n) {
-  if (!makeupMode || state == MAKEUP_SETTING) return false;
-  snprintf(buf, n, "%s(%us)", preset().name, (unsigned)makeupSec());
-  return true;
+// 右端の縦書き。文字を1つずつ縦に並べる (フォント1は 6x8)。
+static const int16_t HINT_CH_H = 8;
+
+static void drawKeyHint(const char* text, uint16_t fg, uint16_t bg) {
+  if (text == nullptr) return;
+  const int16_t n = (int16_t)strlen(text);
+  int16_t y = TOP_H + 2;
+  if (y + n * HINT_CH_H > H - 2) y = H - 2 - n * HINT_CH_H;  // 入らなければ下詰め
+  spr.setTextColor(fg, bg);
+  spr.setTextDatum(TR_DATUM);
+  for (int16_t i = 0; i < n; i++) {
+    const char ch[2] = {text[i], '\0'};
+    spr.drawString(ch, W - 2, y + i * HINT_CH_H, 1);
+  }
 }
 
-// 設定画面の中央「[ 20 ]sec」。数字の枠は3桁ぶんで固定してあるので、2桁でも
-// 3桁でも [ ] の位置は動かない。数字はその枠の中で中央揃えにする。
-static const int16_t SET_GAP_IN  = 4;   // [ と数字の間
-static const int16_t SET_GAP_OUT = 6;   // ] と sec の間
+// 設定画面の中央「[ 180 ]sec」。数字は白地に黒で出し、その横に sec を添える。
+// 枠は3桁ぶんで固定してあるので、2桁でも3桁でも枠と sec の位置は動かない。
+static const int16_t SET_PAD     = 4;   // 白枠の内側の余白
+static const int16_t SET_GAP_OUT = 6;   // 白枠と sec の間
 static const uint8_t SETTING_NUM_FONTS[] = {6, 4};  // 数字に使う候補 (大きい順)
 
-// 「[ 000 ]sec」を組んだときの全体の幅。slotW に数字3桁ぶんの枠の幅を返す。
-static int16_t settingGroupW(uint8_t numFont, uint8_t subFont, int16_t* slotW) {
-  *slotW = spr.textWidth("000", numFont);
-  return spr.textWidth("[", subFont) + SET_GAP_IN + *slotW + SET_GAP_IN
-       + spr.textWidth("]", subFont) + SET_GAP_OUT + spr.textWidth("sec", subFont);
-}
-
 static void drawSettingValue(uint16_t fg, uint16_t bg) {
-  const int16_t availH = H - TOP_H - BOTTOM_H;
-  const int16_t cy     = TOP_H + availH / 2;
+  const int16_t top    = TOP_H;
+  const int16_t availH = H - top - 4;
+  const int16_t cy     = top + availH / 2;
 
   // 数字はフォント2から始めて、全体が横に収まるならより大きいものに差し替える。
-  // 括弧と sec は数字より一段小さいフォントで添える。
   uint8_t numFont = 2, subFont = 2;
-  int16_t slotW   = 0;
-  int16_t groupW  = settingGroupW(numFont, subFont, &slotW);
   for (uint8_t i = 0; i < sizeof(SETTING_NUM_FONTS) / sizeof(SETTING_NUM_FONTS[0]); i++) {
     const uint8_t f = SETTING_NUM_FONTS[i];
     const uint8_t t = (f > 4) ? 4 : 2;
     // ビルドに含まれていないフォントは高さ 0 になるので飛ばす
-    if (spr.fontHeight(f) <= 0 || spr.fontHeight(f) > availH) continue;
-    if (spr.fontHeight(t) <= 0) continue;
-    int16_t w = 0;
-    const int16_t g = settingGroupW(f, t, &w);
-    if (w > 0 && g <= W - 8) {
-      numFont = f;  subFont = t;  slotW = w;  groupW = g;
-      break;
-    }
+    if (spr.fontHeight(f) <= 0 || spr.fontHeight(t) <= 0) continue;
+    if (spr.fontHeight(f) + SET_PAD * 2 > availH) continue;
+    const int16_t g = spr.textWidth("000", f) + SET_PAD * 2
+                    + SET_GAP_OUT + spr.textWidth("sec", t);
+    if (g <= W - 8) { numFont = f; subFont = t; break; }
   }
 
+  const int16_t slotW = spr.textWidth("000", numFont);
+  const int16_t boxW  = slotW + SET_PAD * 2;
+  const int16_t boxH  = spr.fontHeight(numFont) + SET_PAD * 2;
+  const int16_t secW  = spr.textWidth("sec", subFont);
+  const int16_t x     = (W - (boxW + SET_GAP_OUT + secW)) / 2;
+
   char num[8];
-  snprintf(num, sizeof(num), "%u", (unsigned)makeupSec());
+  snprintf(num, sizeof(num), "%u", (unsigned)shootingSec());
+
+  spr.fillRect(x, cy - boxH / 2, boxW, boxH, fg);     // 白地の枠
+  spr.setTextColor(bg, fg);                           // 枠の中は黒文字
+  spr.setTextDatum(MC_DATUM);
+  spr.drawString(num, x + boxW / 2, cy, numFont);     // 枠の中で中央揃え
 
   spr.setTextColor(fg, bg);
-  int16_t x = (W - groupW) / 2;
-
   spr.setTextDatum(ML_DATUM);
-  spr.drawString("[", x, cy, subFont);
-  x += spr.textWidth("[", subFont) + SET_GAP_IN;
+  spr.drawString("sec", x + boxW + SET_GAP_OUT, cy, subFont);
+}
 
-  spr.setTextDatum(MC_DATUM);
-  spr.drawString(num, x + slotW / 2, cy, numFont);   // 枠の中で中央揃え
-  x += slotW + SET_GAP_IN;
-
-  spr.setTextDatum(ML_DATUM);
-  spr.drawString("]", x, cy, subFont);
-  x += spr.textWidth("]", subFont) + SET_GAP_OUT;
-  spr.drawString("sec", x, cy, subFont);
+// 開始待ちの下段に出す「( Shooting 180s )」。どの設定で何秒なのかを見せる。
+static void drawReadyMode(uint16_t fg, uint16_t bg) {
+  char text[32];
+  snprintf(text, sizeof(text), "( %s %us )", mode().name, (unsigned)shootingSec());
+  spr.setTextColor(fg, bg);
+  spr.setTextDatum(BC_DATUM);
+  spr.drawString(text, W / 2, H - 2, (spr.textWidth(text, 2) <= W - 8) ? 2 : 1);
 }
 
 // 信号の色。行射だけが緑/黄、設定画面だけが黒で、それ以外は赤。
 // 設定画面からスタートしても、ムーブアップは赤に戻る。
 static uint16_t signalColor(uint32_t now) {
-  if (state == MAKEUP_SETTING) return COLOR_BLACK;
+  if (state == SETTING) return COLOR_BLACK;
   if (state == SHOOTING) {
     return (remainingSec(now) <= WARN_SEC) ? COLOR_YELLOW : COLOR_GREEN;
   }
@@ -651,9 +647,14 @@ static uint16_t signalColor(uint32_t now) {
 }
 
 static void render(uint32_t now, uint16_t value, bool blank) {
-  if (durationSec != sizedFor) {
+  // 中央の帯。開始待ちは下段に設定の名前を出すので、そのぶん狭くなる。
+  const int16_t bottomH = (state == READY) ? (spr.fontHeight(2) + 4) : BOTTOM_H;
+  const int16_t bandH   = H - TOP_H - bottomH;
+
+  if (durationSec != sizedFor || bandH != sizedH) {
     sizedFor = durationSec;
-    chooseFont(durationSec);
+    sizedH   = bandH;
+    chooseFont(durationSec, bandH);
   }
 
   const uint16_t bg = signalColor(now);
@@ -662,41 +663,34 @@ static void render(uint32_t now, uint16_t value, bool blank) {
   spr.fillSprite(bg);
   spr.setTextColor(fg, bg);
 
-  // 上段: 状態と、「立」または補充矢・シュートオフの名前と秒数。
-  // 状態はフォント2で出すが、文字数が多くて右側と並ばないときは小さい字にする。
-  char tag[24];
-  const bool    hasTag = makeupTagText(tag, sizeof(tag));
-  const int16_t tagW   = hasTag ? spr.textWidth(tag, 1) : 0;
-  const int16_t availW = W - 8 - (hasTag ? tagW + 6 : 0);
-
-  const char* label = stateLabel();
+  // 上段右: 「立」。上段左: 状態。並ばないときは状態を小さい字にする
+  const int16_t roundsW = drawRounds(now, fg, bg);
+  const char*   label   = stateLabel();
   spr.setTextDatum(TL_DATUM);
-  if (spr.textWidth(label, 2) <= availW) spr.drawString(label, 4, 0, 2);
-  else                                   spr.drawString(label, 4, 4, 1);
+  if (spr.textWidth(label, 2) <= W - 8 - roundsW) spr.drawString(label, 4, 0, 2);
+  else                                            spr.drawString(label, 4, 4, 1);
 
-  if (hasTag) {
-    spr.setTextDatum(TR_DATUM);
-    spr.drawString(tag, W - 4, 4, 1);
-  } else if (!makeupMode) {
-    drawRounds(now, fg, bg);
-  }
+  // 右端: ボタンAを押したときの行き先
+  drawKeyHint(keyHintA(), fg, bg);
 
-  // 中央: 設定画面は「[ 20 ]sec」、それ以外は残り秒数
-  if (state == MAKEUP_SETTING) {
+  // 中央: 設定画面は「[ 180 ]sec」、それ以外は残り秒数
+  if (state == SETTING) {
     drawSettingValue(fg, bg);
   } else if (!blank) {
     char text[8];
     snprintf(text, sizeof(text), "%u", (unsigned)value);
     spr.setTextDatum(MC_DATUM);
     spr.setTextSize(bigSize);
-    spr.drawString(text, W / 2, TOP_H + (H - TOP_H - BOTTOM_H) / 2, bigFont);
+    spr.drawString(text, W / 2, TOP_H + bandH / 2, bigFont);
     spr.setTextSize(1);
   }
 
-  // 下段: 残時間バー
-  const int16_t barX = 4, barW = W - 8, barY = H - BAR_H - BAR_MARGIN;
-  spr.drawRect(barX, barY, barW, BAR_H, fg);
-  if (durationSec > 0) {
+  // 下段: 開始待ちは設定の名前と秒数、動いている間は残時間バー
+  if (state == READY) {
+    drawReadyMode(fg, bg);
+  } else if (state != SETTING && durationSec > 0) {
+    const int16_t barX = 4, barW = W - 8, barY = H - BAR_H - BAR_MARGIN;
+    spr.drawRect(barX, barY, barW, BAR_H, fg);
     const int16_t fill = (int16_t)((uint32_t)(barW - 2) * remainingMs(now) / totalMs());
     if (fill > 0) spr.fillRect(barX + 1, barY + 1, fill, BAR_H - 2, fg);
   }
@@ -729,7 +723,7 @@ void setup() {
   sendInit();
   RS485.flush();
 
-  resetToStandby();
+  toSetting(0);   // 起動時は Shooting Time の設定画面から
 }
 
 void loop() {
