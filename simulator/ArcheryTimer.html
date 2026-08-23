@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ArcheryTimer シミュレータ (M5StickC)</title>
+<style>
+  :root {
+    --body-color: #e2782f;
+    --page-bg: #1b1d21;
+    --panel-bg: #26292e;
+    --text: #e8e8e8;
+    --muted: #9aa0a8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 48px;
+    background: var(--page-bg);
+    color: var(--text);
+    font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: .02em; }
+  h1 span { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 8px; }
+
+  /* ---- 本体 ---- */
+  .stick {
+    position: relative;
+    width: 672px;
+    max-width: 100%;
+    aspect-ratio: 672 / 300;
+    background: var(--body-color);
+    border: 3px solid #b45a1d;
+    border-radius: 22px;
+    box-shadow: 0 12px 30px rgba(0,0,0,.45);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+  /* B ボタン (上面) */
+  .btn-b {
+    position: absolute;
+    left: 19.5%;
+    top: -34px;
+    width: 17.5%;
+    height: 34px;
+    background: var(--body-color);
+    border: 3px solid #b45a1d;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; color: #fff;
+    cursor: pointer;
+  }
+  /* A ボタン (正面) */
+  .btn-a {
+    position: absolute;
+    right: 4.4%;
+    top: 30%;
+    width: 18%;
+    aspect-ratio: 1 / 1;
+    background: var(--body-color);
+    border: 3px solid #b45a1d;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; color: #fff;
+    cursor: pointer;
+  }
+  .btn-a:active, .btn-b:active, .pressed { background: #c96526; }
+  /* 画面 */
+  #lcd {
+    position: absolute;
+    left: 6.4%;
+    top: 8%;
+    width: 65%;
+    height: 78%;
+    background: #000;
+    border-radius: 10px;
+    image-rendering: pixelated;
+  }
+  /* 赤色LED */
+  .led {
+    position: absolute;
+    left: 2.6%;
+    bottom: 4%;
+    width: 7%;
+    aspect-ratio: 1/1;
+    border-radius: 50%;
+    background: #6b1414;
+    transition: background .04s linear, box-shadow .04s linear;
+  }
+  .led.on {
+    background: #ff1d1d;
+    box-shadow: 0 0 14px 6px rgba(255,40,40,.75);
+  }
+
+  /* ---- 操作パネル ---- */
+  .panel {
+    width: 672px;
+    max-width: 100%;
+    background: var(--panel-bg);
+    border: 1px solid #383c42;
+    border-radius: 12px;
+    padding: 14px 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 26px;
+    align-items: center;
+    font-size: 13px;
+  }
+  .panel label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  .panel .sep { flex: 1 1 auto; }
+  .keys { color: var(--muted); }
+  kbd {
+    background: #14161a; border: 1px solid #4a4f57; border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 6px; font-size: 12px; font-family: inherit;
+  }
+  table.help {
+    width: 672px; max-width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    background: var(--panel-bg);
+    border: 1px solid #383c42;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .help th, .help td { padding: 7px 12px; text-align: left; border-bottom: 1px solid #34383e; }
+  .help th { background: #2f333a; font-weight: 600; }
+  .help tr:last-child td { border-bottom: none; }
+  .help td:first-child { white-space: nowrap; color: #ffcf8a; }
+  .note { width: 672px; max-width: 100%; color: var(--muted); font-size: 12px; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<h1>ArcheryTimer シミュレータ<span>M5StickC / RS-485 出力なし</span></h1>
+
+<div class="stick" id="stick">
+  <div class="btn-b" id="btnB">B</div>
+  <canvas id="lcd" width="160" height="80"></canvas>
+  <div class="btn-a" id="btnA">A</div>
+  <div class="led" id="led"></div>
+</div>
+
+<div class="panel">
+  <label><input type="checkbox" id="buzzer"> ブザーを鳴らす（既定はOFF）</label>
+  <label><input type="checkbox" id="fast"> 早回し (10倍速)</label>
+  <span class="sep"></span>
+  <span class="keys">キーボード: <kbd>A</kbd> / <kbd>→</kbd> = ボタンA　<kbd>B</kbd> / <kbd>←</kbd> = ボタンB　長押しは押しっぱなし (0.8秒)</span>
+</div>
+
+<table class="help">
+  <tr><th>画面</th><th>A 短押し</th><th>A 長押し</th><th>B 短押し</th><th>B 長押し</th></tr>
+  <tr><td>初期画面</td><td>START (2声)</td><td>同左</td><td>SETUP へ</td><td>そのまま</td></tr>
+  <tr><td>SETUP (黒)</td><td>カーソルの項目を進める</td><td>初期画面へ</td><td>カーソルを次へ</td><td>初期画面へ</td></tr>
+  <tr><td>MOVE UP (赤)</td><td>—</td><td>早送り</td><td>中断 (5声)</td><td>初期画面へ</td></tr>
+  <tr><td>行射 (緑/黄)</td><td>—</td><td>早送り</td><td>中断 (5声)</td><td>中断 (5声)</td></tr>
+  <tr><td>HALT (赤)</td><td>START / RESUME</td><td>行射終了 (3声)</td><td>—</td><td>初期画面へ</td></tr>
+  <tr><td>FINISHED (赤)</td><td>初期画面へ</td><td>同左</td><td>—</td><td>初期画面へ</td></tr>
+</table>
+
+<p class="note">
+  ArcheryTimer/ArcheryTimer.ino と同じ状態機械・同じ画面レイアウトで動きます。RS-485 の送出だけ行いません。<br>
+  合図が鳴っている間は、画面に白い枠が出て左下の赤色LEDが点きます（ブザーONなら音も鳴ります）。
+</p>
+
+<script>
+"use strict";
+// ===========================================================================
+//  ArcheryTimer シミュレータ
+//  ArcheryTimer/ArcheryTimer.ino の移植。定数・状態遷移・描画は実機と同じ。
+// ===========================================================================
+
+// ------------------------------------------------------------------ 設定
+const MOVEUP_SEC     = 10;   // ムーブアップ（準備）時間 [秒]
+const WARN_SEC       = 30;   // 行射残りこの秒数から黄色 [秒]
+const REPEAT_DEFAULT = 1;
+const REPEAT_MAX     = 4;    // REPEAT で回せる上限 (この次が ∞)
+
+const SHOOTING_SEC_TABLE = [180, 240, 60, 90, 120];
+const MAKEUP_SEC_TABLE   = [30, 40, 60, 80, 90, 100, 120, 150, 20];
+
+const MODES = [
+  { title: "Shooting", tag: null,        table: SHOOTING_SEC_TABLE },
+  { title: "MakeUp",   tag: "MAKE UP",   table: MAKEUP_SEC_TABLE },
+  { title: "ShootOff", tag: "SHOOT OFF", table: MAKEUP_SEC_TABLE },
+];
+const MODE_COUNT = MODES.length;
+
+const LONG_PRESS_MS = 800;   // 長押しの判定時間
+const BUZZER_FREQ   = 2000;
+
+// 合図: 0.7秒鳴動 -> 0.3秒インターバル
+const BEEP_ON_MS    = 700;
+const BEEP_CYCLE_MS = 1000;
+const BUZZER_READY  = 2;  // ムーブアップ開始
+const BUZZER_START  = 1;  // 行射開始 / 再開
+const BUZZER_FINISH = 3;  // 行射終了
+const BUZZER_ALARM  = 5;  // 中断
+
+// ------------------------------------------------------------------ 状態
+const SETTING = 0, READY = 1, MOVEUP = 2, SHOOTING = 3,
+      HALT_MOVEUP = 4, HALT_SHOOTING = 5, FINISHED = 6;
+const CUR_REPEAT = 0, CUR_MODE = 1, CUR_TIME = 2, CUR_EXIT = 3, CUR_COUNT = 4;
+
+let state       = READY;
+let roundNo     = 1;
+let repeatCount = REPEAT_DEFAULT;   // 0 = ∞
+let durationSec = 0;
+let elapsedMs   = 0;
+let runOrigin   = 0;
+let running     = false;
+
+let modeNo      = 0;
+let modeIndex   = [0, 0, 0];
+let setupCursor = CUR_REPEAT;
+
+let beepAnchor = 0, beepCount = 0, beepBlink = false, beepArmed = false;
+
+const mode        = () => MODES[modeNo];
+const shootingSec = () => mode().table[modeIndex[modeNo]];
+const repeatOf    = () => (modeNo === 0 ? repeatCount : 1);
+
+const currentElapsedMs = (now) => (running ? elapsedMs + (now - runOrigin) : elapsedMs);
+const totalMs          = () => durationSec * 1000;
+const remainingMs = (now) => {
+  const done = currentElapsedMs(now);
+  return done >= totalMs() ? 0 : totalMs() - done;
+};
+const remainingSec = (now) => {
+  const sec = Math.floor(currentElapsedMs(now) / 1000);
+  return durationSec > sec ? durationSec - sec : 0;
+};
+
+function triggerBeep(count, now, blink = false) {
+  beepAnchor = now; beepCount = count; beepBlink = blink; beepArmed = true;
+}
+function silence() { beepArmed = false; beepBlink = false; beepCount = 0; }
+
+function beepActiveAt(now) {
+  if (!beepArmed) return false;
+  const rel = now - beepAnchor;
+  if (rel >= beepCount * BEEP_CYCLE_MS) return false;
+  return (rel % BEEP_CYCLE_MS) < BEEP_ON_MS;
+}
+function beepBlinkWindow(now) {
+  if (!beepBlink || !beepArmed) return false;
+  const total = beepCount * BEEP_CYCLE_MS - (BEEP_CYCLE_MS - BEEP_ON_MS);
+  return (now - beepAnchor) < total;
+}
+
+// --- 状態遷移 ---
+function startMoveup(now) {
+  state = MOVEUP; durationSec = MOVEUP_SEC; elapsedMs = 0;
+  runOrigin = now; running = true;
+  triggerBeep(BUZZER_READY, now);            // 2声
+}
+function startShooting(now, resuming) {
+  state = SHOOTING;
+  if (!resuming) { durationSec = shootingSec(); elapsedMs = 0; }
+  runOrigin = now; running = true;
+  triggerBeep(BUZZER_START, now);            // 1声
+}
+function finish(now) {
+  state = FINISHED; durationSec = 0; elapsedMs = 0; running = false;
+  triggerBeep(BUZZER_FINISH, now, true);     // 3声 + 点滅
+}
+function completeRound(now) {
+  if (repeatOf() === 0 || roundNo < repeatOf()) {
+    roundNo++;
+    startMoveup(now);                        // 2声
+  } else {
+    finish(now);                             // 3声
+  }
+}
+function toReady() {
+  // MakeUp / ShootOff は1立だけ。走り終えたら通常の Shooting に戻す
+  if (state !== SETTING && state !== READY) modeNo = 0;
+  roundNo = 1; state = READY; durationSec = 0; elapsedMs = 0; running = false;
+  silence();
+}
+function toSetup() {
+  setupCursor = CUR_REPEAT;
+  roundNo = 1; state = SETTING; durationSec = 0; elapsedMs = 0; running = false;
+  silence();
+}
+function cycleShootingSec() { modeIndex[modeNo] = (modeIndex[modeNo] + 1) % mode().table.length; }
+function cycleMode()        { modeNo = (modeNo + 1) % MODE_COUNT; }
+function cycleRepeat() {
+  if (repeatCount === 0)             repeatCount = 1;
+  else if (repeatCount >= REPEAT_MAX) repeatCount = 0;   // ∞
+  else                                repeatCount++;
+}
+
+// --- ボタン操作 ---
+function setupAdvance() {
+  switch (setupCursor) {
+    case CUR_REPEAT: if (modeNo === 0) cycleRepeat(); break;
+    case CUR_MODE:   cycleMode(); break;
+    case CUR_TIME:   cycleShootingSec(); break;
+    default:         toReady(); break;       // [ Exit SETUP ]
+  }
+}
+function keySpace(now) {                     // ボタンA 短押し
+  switch (state) {
+    case SETTING:       setupAdvance(); break;
+    case READY:         startMoveup(now); break;
+    case HALT_MOVEUP:   startMoveup(now); break;
+    case HALT_SHOOTING: startShooting(now, true); break;
+    case FINISHED:      toReady(); break;
+  }
+}
+function keyRight(now) {                     // ボタンA 長押し
+  if (state === MOVEUP || state === SHOOTING)                 completeRound(now);
+  else if (state === HALT_MOVEUP || state === HALT_SHOOTING)  finish(now);
+  else if (state === SETTING)                                 toReady();
+  else                                                        keySpace(now);
+}
+function keyHalt(now) {
+  if (state !== MOVEUP && state !== SHOOTING) return;
+  elapsedMs = currentElapsedMs(now);
+  running = false;
+  state = (state === MOVEUP) ? HALT_MOVEUP : HALT_SHOOTING;
+  triggerBeep(BUZZER_ALARM, now);            // 5声
+}
+function keyEnter(now) {                     // ボタンB 短押し
+  if (state === SETTING)    setupCursor = (setupCursor + 1) % CUR_COUNT;
+  else if (state === READY) toSetup();
+  else                      keyHalt(now);
+}
+function keyReset(now) {                     // ボタンB 長押し
+  if (state === SHOOTING) keyHalt(now);
+  else                    toReady();
+}
+function updateState(now) {
+  if (state === FINISHED && beepArmed && !beepBlinkWindow(now)) { toReady(); return; }
+  if (!running) return;
+  if (currentElapsedMs(now) < totalMs()) return;
+  if (state === MOVEUP)        startShooting(now, false);
+  else if (state === SHOOTING) completeRound(now);
+}
+
+// ------------------------------------------------------------------ 画面
+// TFT_eSPI のフォントを、幅の実測に近い値で真似ている。
+// 文字は1文字ずつ決まった幅の枠に入れて描くので、実機と同じ位置に並ぶ。
+const FONTS = {
+  1: { h: 8,  px: 9,   weight: "500",  digitsOnly: false },
+  2: { h: 16, px: 16,  weight: "500",  digitsOnly: false },
+  4: { h: 26, px: 26,  weight: "500",  digitsOnly: false },
+  6: { h: 48, px: 50,  weight: "700",  digitsOnly: true  },
+  7: { h: 48, px: 52,  weight: "700",  digitsOnly: true  },
+  8: { h: 75, px: 80,  weight: "700",  digitsOnly: true  },
+};
+const FAMILY = '"DejaVu Sans Mono", "Menlo", "Consolas", monospace';
+
+function charWidth(c, font) {
+  const digit = c >= "0" && c <= "9";
+  const upper = c >= "A" && c <= "Z";
+  const lower = c >= "a" && c <= "z";
+  switch (font) {
+    case 1: return 6;
+    case 2: return digit ? 11 : upper ? 12 : lower ? 9 : (c === " " ? 5 : 6);
+    case 4: return digit ? 14 : upper ? 18 : lower ? 14 : (c === " " ? 7 : 9);
+    case 6: return digit ? 27 : 0;
+    case 7: return digit ? 32 : 0;
+    case 8: return digit ? 55 : 0;
+  }
+  return 0;
+}
+
+const W = 160, H = 80;
+const SCALE = 6;
+const canvas = document.getElementById("lcd");
+canvas.width  = W * SCALE;
+canvas.height = H * SCALE;
+const ctx = canvas.getContext("2d");
+ctx.scale(SCALE, SCALE);
+
+const COLOR_RED = "#ff0000", COLOR_GREEN = "#009946", COLOR_YELLOW = "#ffff00",
+      COLOR_BLACK = "#000000", WHITE = "#ffffff", CURSOR = COLOR_YELLOW;
+
+const TOP_H = 18, BAR_H = 6, BAR_MARGIN = 2, BOTTOM_H = BAR_H + BAR_MARGIN * 2;
+
+let textSize = 1;
+const setTextSize = (s) => { textSize = s; };
+const fontHeight  = (font) => FONTS[font].h * textSize;
+const textWidth   = (text, font) => {
+  let w = 0;
+  for (const c of String(text)) w += charWidth(c, font);
+  return w * textSize;
+};
+
+// datum: TL / TR / MC / ML / BL
+function drawString(text, x, y, font, color, datum = "TL") {
+  text = String(text);
+  const f = FONTS[font];
+  const h = fontHeight(font);
+  const w = textWidth(text, font);
+  let left = x, top = y;
+  if (datum === "TR")      { left = x - w; }
+  else if (datum === "MC") { left = x - w / 2; top = y - h / 2; }
+  else if (datum === "ML") { top = y - h / 2; }
+  else if (datum === "BL") { top = y - h; }
+
+  ctx.fillStyle = color;
+  ctx.font = `${f.weight} ${f.px * textSize}px ${FAMILY}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  let cx = left;
+  for (const c of text) {
+    const cw = charWidth(c, font) * textSize;
+    if (cw > 0 && c !== " ") ctx.fillText(c, cx + cw / 2, top + h / 2 + (font >= 6 ? 1 : 0));
+    cx += cw;
+  }
+}
+const fillRect = (x, y, w, h, color) => { ctx.fillStyle = color; ctx.fillRect(x, y, w, h); };
+const drawRect = (x, y, w, h, color) => {
+  ctx.strokeStyle = color; ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+};
+const drawCircle = (cx, cy, r, color) => {
+  ctx.strokeStyle = color; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(cx + 0.5, cy + 0.5, r, 0, Math.PI * 2); ctx.stroke();
+};
+
+// 中央の数字に使うフォント (大きい順)
+const FONT_CANDIDATES = [
+  [8,2],[7,2],[8,1],[4,3],[6,1],[7,1],[4,2],[2,2],[4,1],[2,1]
+];
+let bigFont = 7, bigSize = 1, sizedFor = -1, sizedH = -1;
+
+function chooseFont(maxValue, availH) {
+  const text = String(maxValue);
+  bigFont = 2; bigSize = 1;
+  for (const [f, s] of FONT_CANDIDATES) {
+    setTextSize(s);
+    const h = fontHeight(f);
+    if (h <= 0 || h > availH) continue;
+    const w = textWidth(text, f);
+    if (w > 0 && w <= W - 6) { bigFont = f; bigSize = s; break; }
+  }
+  setTextSize(1);
+}
+
+function stateLabel() {
+  switch (state) {
+    case MOVEUP:        return "MOVE UP";
+    case HALT_MOVEUP:
+    case HALT_SHOOTING: return "HALT";
+    case FINISHED:      return "FINISHED";
+    default:            return null;
+  }
+}
+function keyHintA() {
+  switch (state) {
+    case SETTING:
+      switch (setupCursor) {
+        case CUR_REPEAT: return "REPEAT>>";
+        case CUR_MODE:   return "MODE>>";
+        case CUR_TIME:   return "TIME>>";
+        default:         return "Enter";
+      }
+    case READY:         return "START";
+    case HALT_MOVEUP:   return "START";
+    case HALT_SHOOTING: return "RESUME";
+    default:            return null;   // 行射終了は点滅が終わると自動で戻る
+  }
+}
+
+const BADGE_PAD = 3;
+const badgeW = (t) => (t === null ? 0 : textWidth(t, 1) + BADGE_PAD * 2);
+const badgeH = () => fontHeight(1) + BADGE_PAD * 2;
+function drawBadge(text, x, y) {
+  if (text === null) return;
+  const w = badgeW(text), h = badgeH();
+  fillRect(x, y, w, h, WHITE);
+  drawString(text, x + w / 2, y + h / 2, 1, COLOR_BLACK, "MC");
+}
+const drawKeyHint = (text) => drawBadge(text, W - 2 - badgeW(text), H - 2 - badgeH());
+
+const INF_R = 5, INF_W = INF_R * 4, INF_CY = 8;
+function drawInfinity(rightX, cy, r, color) {
+  const cx2 = rightX - r, cx1 = cx2 - r * 2;
+  drawCircle(cx1, cy, r, color);
+  drawCircle(cx1, cy, r - 1, color);
+  drawCircle(cx2, cy, r, color);
+  drawCircle(cx2, cy, r - 1, color);
+}
+
+function drawRounds(fg) {
+  let x = W - 4;
+  if (repeatOf() === 0) {
+    drawInfinity(x, INF_CY, INF_R, fg);
+    x -= INF_W;
+  } else {
+    const den = String(repeatOf());
+    drawString(den, x, 0, 2, fg, "TR");
+    x -= textWidth(den, 2);
+  }
+  const num = roundNo + "/";
+  drawString(num, x, 0, 2, fg, "TR");
+  return (W - 4) - (x - textWidth(num, 2));
+}
+function drawTopRight(fg) {
+  const tag = mode().tag;
+  if (tag === null) return drawRounds(fg);
+  drawString(tag, W - 4, 4, 1, fg, "TR");
+  return textWidth(tag, 1);
+}
+
+const blinkOff = (now) => Math.floor(now / 400) % 2 === 1;
+const cursorColor = (now, at, fg, bg) =>
+  (setupCursor !== at) ? fg : (blinkOff(now) ? bg : CURSOR);
+
+function drawRun(text, xRef, y, font, color) {
+  drawString(text, xRef.x, y, font, color, "ML");
+  xRef.x += textWidth(text, font);
+}
+
+function drawSetupScreen(now, fg, bg) {
+  const lineH = fontHeight(1);
+
+  // 1行目: 見出しと REPEAT
+  drawBadge("SETUP", 4, 1);
+  const topCy = 1 + badgeH() / 2;
+  const xr = { x: 4 + badgeW("SETUP") + 8 };
+  drawRun(`REPEAT: ${roundNo} / [ `, xr, topCy, 1, fg);
+  const repColor = cursorColor(now, CUR_REPEAT, fg, bg);
+  if (repeatOf() === 0) {
+    const r = 3;
+    if (repColor !== bg) drawInfinity(xr.x + r * 4, topCy, r, repColor);
+    xr.x += r * 4;
+  } else {
+    drawRun(String(repeatOf()), xr, topCy, 1, repColor);
+  }
+  drawRun(" ]", xr, topCy, 1, fg);
+
+  // 2行目: MODE の見出し / 3行目: 3つの MODE
+  const modeY = 1 + badgeH() + 3;
+  drawString("MODE", 4, modeY, 1, fg, "TL");
+
+  const listY = modeY + lineH + 4 + lineH / 2;
+  const xl = { x: 5 };
+  for (let i = 0; i < MODE_COUNT; i++) {
+    const here = (i === modeNo);
+    const w = textWidth(MODES[i].title, 1);
+    if (here) {
+      const frame = (setupCursor === CUR_MODE) ? CURSOR : fg;
+      drawRect(xl.x - 3, listY - lineH / 2 - 2, w + 6, lineH + 4, frame);
+    }
+    drawRun(MODES[i].title, xl, listY, 1, here ? cursorColor(now, CUR_MODE, fg, bg) : fg);
+    xl.x += textWidth(" ", 1) + 2;
+  }
+
+  // 4行目: TIME (数字の枠は3桁ぶんで固定)
+  const timeY = listY + lineH / 2 + 4 + fontHeight(2) / 2;
+  const xt = { x: 4 };
+  drawRun("TIME [ ", xt, timeY, 2, fg);
+  const slotW = textWidth("000", 2);
+  drawString(String(shootingSec()), xt.x + slotW / 2, timeY, 2,
+             cursorColor(now, CUR_TIME, fg, bg), "MC");
+  xt.x += slotW;
+  drawRun(" ] sec", xt, timeY, 2, fg);
+
+  // 5行目: 設定を終わる
+  const exitY = timeY + fontHeight(2) / 2 + 3;
+  drawString("[ Exit SETUP ]", 4, exitY, 1, cursorColor(now, CUR_EXIT, fg, bg), "TL");
+}
+
+function signalColor(now) {
+  if (state === SETTING) return COLOR_BLACK;
+  if (state === SHOOTING) return (remainingSec(now) <= WARN_SEC) ? COLOR_YELLOW : COLOR_GREEN;
+  return COLOR_RED;
+}
+
+function render(now, value, blank) {
+  const bandH = H - TOP_H - BOTTOM_H;
+  if (durationSec !== sizedFor || bandH !== sizedH) {
+    sizedFor = durationSec; sizedH = bandH;
+    chooseFont(durationSec, bandH);
+  }
+
+  const bg = signalColor(now);
+  const fg = (bg === COLOR_YELLOW) ? COLOR_BLACK : WHITE;
+
+  fillRect(0, 0, W, H, bg);
+
+  if (state === SETTING) {
+    drawSetupScreen(now, fg, bg);
+  } else {
+    drawTopRight(fg);
+
+    if (state === READY)            drawBadge("SETUP", 4, 1);
+    else if (stateLabel() !== null) drawString(stateLabel(), 4, 0, 2, fg, "TL");
+
+    if (!blank) {
+      setTextSize(bigSize);
+      drawString(String(value), W / 2, TOP_H + bandH / 2, bigFont, fg, "MC");
+      setTextSize(1);
+    }
+
+    if (state === READY || state === MOVEUP) {
+      drawString(shootingSec() + "sec", 4, H - 2, 2, fg, "BL");
+    }
+
+    if (state === SHOOTING && durationSec > 0) {
+      const barX = 4, barY = H - BAR_H - BAR_MARGIN, barW = W - 8;
+      drawRect(barX, barY, barW, BAR_H, fg);
+      const fill = Math.floor((barW - 2) * remainingMs(now) / totalMs());
+      if (fill > 0) fillRect(barX + 1, barY + 1, fill, BAR_H - 2, fg);
+    }
+  }
+
+  drawKeyHint(keyHintA());
+
+  if (beepActiveAt(now)) {
+    drawRect(0, 0, W, H, fg);
+    drawRect(1, 1, W - 2, H - 2, fg);
+    drawRect(2, 2, W - 4, H - 4, fg);
+  }
+}
+
+// ------------------------------------------------------------------ ブザー
+let audioCtx = null, osc = null, gain = null;
+const buzzerEnabled = () => document.getElementById("buzzer").checked;
+
+function audioStart() {
+  if (audioCtx) { if (audioCtx.state === "suspended") audioCtx.resume(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  audioCtx = new AC();
+  osc  = audioCtx.createOscillator();
+  gain = audioCtx.createGain();
+  osc.type = "square";
+  osc.frequency.value = BUZZER_FREQ;
+  gain.gain.value = 0;
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start();
+}
+function buzzerSet(on) {
+  if (!gain || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  gain.gain.cancelScheduledValues(t);
+  gain.gain.setTargetAtTime(on ? 0.18 : 0, t, 0.005);
+}
+
+// ------------------------------------------------------------------ ボタン
+const btns = {
+  A: { el: document.getElementById("btnA"), pressed: false, downAt: 0, longFired: false, released: false },
+  B: { el: document.getElementById("btnB"), pressed: false, downAt: 0, longFired: false, released: false },
+};
+function press(b, now)   { if (!b.pressed) { b.pressed = true; b.downAt = now; b.el.classList.add("pressed"); } }
+function release(b)      { if (b.pressed)  { b.pressed = false; b.released = true; b.el.classList.remove("pressed"); } }
+
+for (const key of ["A", "B"]) {
+  const b = btns[key];
+  b.el.addEventListener("pointerdown", (e) => { e.preventDefault(); audioStart(); press(b, clock()); });
+  b.el.addEventListener("pointerup",     () => release(b));
+  b.el.addEventListener("pointerleave",  () => release(b));
+  b.el.addEventListener("pointercancel", () => release(b));
+  b.el.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+addEventListener("keydown", (e) => {
+  if (e.repeat) return;
+  const b = keyToBtn(e.key);
+  if (!b) return;
+  e.preventDefault(); audioStart(); press(b, clock());
+});
+addEventListener("keyup", (e) => {
+  const b = keyToBtn(e.key);
+  if (b) { e.preventDefault(); release(b); }
+});
+function keyToBtn(k) {
+  if (k === "a" || k === "A" || k === "ArrowRight") return btns.A;
+  if (k === "b" || k === "B" || k === "ArrowLeft")  return btns.B;
+  return null;
+}
+
+// ------------------------------------------------------------------ 本体
+// 早回しのために、実時間ではなく「シミュレータ内の時計」で動かす
+let simNow = 0, lastReal = performance.now();
+const clock = () => simNow;
+const fast = () => document.getElementById("fast").checked;
+
+const led = document.getElementById("led");
+let ledOn = false, toneOn = false;
+
+function loop() {
+  const real = performance.now();
+  simNow += (real - lastReal) * (fast() ? 10 : 1);
+  lastReal = real;
+  const now = simNow;
+
+  // --- 入力 (実機の loop() と同じ順番) ---
+  for (const key of ["A", "B"]) {
+    const b = btns[key];
+    if (b.pressed && !b.longFired && now - b.downAt >= LONG_PRESS_MS) {
+      b.longFired = true;
+      if (key === "A") keyRight(now); else keyReset(now);
+    }
+    if (b.released) {
+      b.released = false;
+      if (!b.longFired) { if (key === "A") keySpace(now); else keyEnter(now); }
+      b.longFired = false;
+    }
+  }
+
+  updateState(now);
+
+  // --- 表示内容 (行射終了の点滅は 0 と全消灯の切り替え) ---
+  let value = remainingSec(now), blank = false;
+  if (state === FINISHED && beepBlinkWindow(now)) {
+    value = 0;
+    blank = !beepActiveAt(now);
+  }
+
+  // --- 赤色LEDとブザー (画面の白枠と同じタイミング) ---
+  const want = beepActiveAt(now);
+  if (want !== ledOn) { ledOn = want; led.classList.toggle("on", want); }
+  const wantTone = want && buzzerEnabled();
+  if (wantTone !== toneOn) { toneOn = wantTone; buzzerSet(wantTone); }
+
+  render(now, value, blank);
+  requestAnimationFrame(loop);
+}
+
+document.getElementById("buzzer").addEventListener("change", () => {
+  audioStart();
+  if (!buzzerEnabled() && toneOn) { toneOn = false; buzzerSet(false); }
+});
+
+toReady();          // 起動時は Shooting の先頭 (180秒) / 1立 の初期画面から
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
