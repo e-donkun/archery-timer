@@ -39,7 +39,7 @@ static const uint16_t REPEAT_MAX     = 4;  // ボタンBで回せる上限 (こ�
 // 行射時間 [秒]。設定(SETUP)画面の TIME でボタンAを押すたびに、その MODE の表を
 // 順に回る。最後まで行くと先頭に戻る。先頭が起動時の値。
 // MakeUp と ShootOff は同じ表を使う (選んでいる位置は別々に覚える)。
-static const uint16_t SHOOTING_SEC_TABLE[] = {180, 240, 120, 90, 60, 40};
+static const uint16_t SHOOTING_SEC_TABLE[] = {180, 240, 60, 90, 120};
 static const uint16_t MAKEUP_SEC_TABLE[]   = {30, 40, 60, 80, 90, 100, 120, 150, 20};
 
 // 3つの MODE。設定画面の MODE でボタンAを押すと、この順に切り替わって先頭に戻る。

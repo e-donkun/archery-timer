@@ -73,11 +73,11 @@ TIME [ 180 ] sec
 
 | MODE | 行射時間の並び |
 | --- | --- |
-| `Shooting` | 180 → 240 → 120 → 90 → 60 → 40 → 180 → … |
+| `Shooting` | 180 → 240 → 60 → 90 → 120 → 180 → … |
 | `MakeUp` / `ShootOff` | 30 → 40 → 60 → 80 → 90 → 100 → 120 → 150 → 20 → 30 → … |
 
 ```cpp
-static const uint16_t SHOOTING_SEC_TABLE[] = {180, 240, 120, 90, 60, 40};
+static const uint16_t SHOOTING_SEC_TABLE[] = {180, 240, 60, 90, 120};
 static const uint16_t MAKEUP_SEC_TABLE[]   = {30, 40, 60, 80, 90, 100, 120, 150, 20};
 ```
 
@@ -156,7 +156,7 @@ static const uint16_t WARN_SEC     = 30;   // 行射残りこの秒数から黄�
 static const uint16_t REPEAT_DEFAULT = 1;  // 起動時の繰り返し回数 (0 = ∞)
 static const uint16_t REPEAT_MAX     = 4;  // REPEAT で回せる上限 (この次が ∞)
 // 行射時間 [秒]。先頭が起動時の値
-static const uint16_t SHOOTING_SEC_TABLE[] = {180, 240, 120, 90, 60, 40};
+static const uint16_t SHOOTING_SEC_TABLE[] = {180, 240, 60, 90, 120};
 static const uint16_t MAKEUP_SEC_TABLE[]   = {30, 40, 60, 80, 90, 100, 120, 150, 20};
 ```
 
