@@ -376,7 +376,12 @@ static void completeRound(uint32_t now) {
 }
 
 // 初期画面(開始待ち)に戻す。設定はそのまま残す。無音。中央は 0。
+// MakeUp と ShootOff は1立だけなので、行射を終えて(あるいは途中でやめて)戻ってきたら
+// 通常の Shooting に戻す。Shooting で決めた繰り返し回数はそのまま残っているので、
+// 3立に設定してあれば 1/3 の初期画面になる。
+// 設定画面から出るときと初期画面のままのときは、選んだ MODE をそのままにする。
 static void toReady() {
+  if (state != SETTING && state != READY) modeNo = 0;
   roundNo     = 1;
   state       = READY;
   durationSec = 0;
