@@ -192,7 +192,13 @@ const MODES = [
 const MODE_COUNT = MODES.length;
 
 const LONG_PRESS_MS = 800;   // 長押しの判定時間
-const BUZZER_FREQ   = 2000;
+
+// ブザーの音色。モルテン UD0040 の「ピロピロ…」に寄せて、3450Hz の正弦波を
+// 18Hz の矩形波で振幅変調している。
+const BUZZER_FREQ  = 3450;   // メインの音 [Hz]
+const BUZZER_LFO   = 18;     // 音量を揺らす速さ [Hz]
+const BUZZER_DEPTH = 0.5;    // 揺れの深さ
+const BUZZER_VOL   = 0.4;    // 全体の音量
 
 // 合図: 0.7秒鳴動 -> 0.3秒インターバル
 const BEEP_ON_MS    = 700;
@@ -625,27 +631,51 @@ function render(now, value, blank) {
 }
 
 // ------------------------------------------------------------------ ブザー
-let audioCtx = null, osc = null, gain = null;
+let audioCtx = null, gain = null;
 const buzzerEnabled = () => document.getElementById("buzzer").checked;
 
+// 音のつなぎ方:
+//   LFO(矩形18Hz) -> lfoGain -> 変調用ゲインの gain
+//   メイン音(正弦3450Hz) -> 変調用ゲイン -> 全体音量 -> 出力
+// 発振器は鳴らしっぱなしにして、全体音量だけで鳴動を切り替える。
 function audioStart() {
   if (audioCtx) { if (audioCtx.state === "suspended") audioCtx.resume(); return; }
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
   audioCtx = new AC();
-  osc  = audioCtx.createOscillator();
-  gain = audioCtx.createGain();
-  osc.type = "square";
+
+  const osc = audioCtx.createOscillator();
+  osc.type = "sine";
   osc.frequency.value = BUZZER_FREQ;
+
+  const lfo = audioCtx.createOscillator();
+  lfo.type = "square";
+  lfo.frequency.value = BUZZER_LFO;
+
+  const lfoGain = audioCtx.createGain();
+  lfoGain.gain.value = BUZZER_DEPTH;
+
+  const modGain = audioCtx.createGain();   // 1.0 を中心に LFO で揺らす
+
+  gain = audioCtx.createGain();
   gain.gain.value = 0;
-  osc.connect(gain).connect(audioCtx.destination);
+
+  lfo.connect(lfoGain);
+  lfoGain.connect(modGain.gain);
+  osc.connect(modGain);
+  modGain.connect(gain);
+  gain.connect(audioCtx.destination);
+
   osc.start();
+  lfo.start();
 }
 function buzzerSet(on) {
   if (!gain || !audioCtx) return;
   const t = audioCtx.currentTime;
   gain.gain.cancelScheduledValues(t);
-  gain.gain.setTargetAtTime(on ? 0.18 : 0, t, 0.005);
+  gain.gain.setValueAtTime(gain.gain.value, t);
+  // 立ち上がり・立ち下がりを少しなまらせて、プツッというノイズを防ぐ
+  gain.gain.linearRampToValueAtTime(on ? BUZZER_VOL : 0, t + 0.02);
 }
 
 // ------------------------------------------------------------------ ボタン
