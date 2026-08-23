@@ -778,8 +778,8 @@ static void render(uint32_t now, uint16_t value, bool blank) {
       spr.setTextSize(1);
     }
 
-    // 下段左: この立の行射時間。行射中はバーを出すので、その手前まで
-    if (state == READY || state == MOVEUP || state == HALT_MOVEUP || state == HALT_SHOOTING) {
+    // 下段左: この立の行射時間 (中断中は出さない)
+    if (state == READY || state == MOVEUP) {
       char text[12];
       snprintf(text, sizeof(text), "%usec", (unsigned)shootingSec());
       spr.setTextColor(fg, bg);

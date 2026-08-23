@@ -95,7 +95,7 @@ static const uint16_t MAKEUP_SEC_TABLE[]   = {30, 40, 60, 80, 90, 100, 120, 150,
 | MOVE UP | 赤 | 白 | 残り秒数 10→0 | `MOVE UP` | 立 or MODE 名 | 行射時間 |
 | 行射 | 緑 | 白 | 残り秒数 | — | 立 or MODE 名 | 残時間バー |
 | 行射（残り30秒以下） | 黄 | 黒 | 残り秒数 30→0 | — | 立 or MODE 名 | 残時間バー |
-| HALT（中断） | 赤 | 白 | 中断した瞬間の値 | `HALT` | 立 or MODE 名 | 行射時間 / `START`・`RESUME` |
+| HALT（中断） | 赤 | 白 | 中断した瞬間の値 | `HALT` | 立 or MODE 名 | `START`・`RESUME` |
 | FINISHED（行射終了） | 赤 | 白 | `0`（点滅） | `FINISHED` | 立 or MODE 名 | — |
 
 上段右は、`Shooting` のときは「立」（`2/3`、`5/∞` など）、`MakeUp` / `ShootOff` のときは
