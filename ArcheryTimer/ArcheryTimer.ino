@@ -602,9 +602,11 @@ static void drawBadge(const char* text, int16_t x, int16_t y) {
   spr.drawString(text, x + w / 2, y + h / 2, 1);
 }
 
-// 画面の左右中央に白地・黒文字の札を出す。
-static void drawBadgeCentered(const char* text, int16_t y) {
-  drawBadge(text, (W - badgeW(text)) / 2, y);
+// SETUP の札は中央ではなく、画面左寄り(全体の1/4)の位置を中心にして
+// 白地・黒文字で出す。上段右の「立」表示と重ならないようにするため。
+static void drawBadgeQuarterLeft(const char* text, int16_t y) {
+  const int16_t cx = (int16_t)((int32_t)W / 4);
+  drawBadge(text, cx - badgeW(text) / 2, y);
 }
 
 // ボタンAの行き先は右下に出す
@@ -696,33 +698,37 @@ static void drawRowCursor(uint8_t at, int16_t cy, uint16_t fg, uint16_t bg) {
 
 static void drawSetupScreen(uint32_t now, uint16_t fg, uint16_t bg) {
   const int16_t lineH = spr.fontHeight(1);
-  const int16_t bigH  = spr.fontHeight(2);   // TIME の数字だけ大きくする
-  const int16_t gap   = 3;
+  const int16_t bigH  = spr.fontHeight(2);   // REPEAT・TIME の数字だけ大きくする
+  const int16_t gap   = 2;
   // 本文の左端。">" カーソルぶんの余白をあけておく。
   const int16_t textX = 2 + spr.textWidth(">", 1) + 3;
   int16_t y = 1;
 
-  // 見出し: SETUP (画面の左右中央、白地・黒文字の札)
-  drawBadgeCentered("SETUP", y);
+  // 見出し: SETUP (画面右寄り、白地・黒文字の札)
+  drawBadgeQuarterLeft("SETUP", y);
   y += badgeH() + gap;
 
-  // 1行目: REPEAT
-  const int16_t repeatCy = y + lineH / 2;
+  // 1行目: REPEAT。数字部分は TIME と同じく大きい文字にする。
+  const int16_t repeatCy = y + bigH / 2;
   drawRowCursor(CUR_REPEAT, repeatCy, fg, bg);
   int16_t x = textX;
   char num[24];
   drawRun("REPEAT: [ ", &x, repeatCy, 1, fg, bg);
   const uint16_t repColor = cursorColor(now, CUR_REPEAT, fg, bg);
   if (repeatOf() == 0) {
-    const int16_t r = 3;
+    const int16_t r = 5;
     if (repColor != bg) drawInfinity(x + r * 4, repeatCy, r, repColor);
     x += r * 4;
   } else {
     snprintf(num, sizeof(num), "%u", (unsigned)repeatOf());
-    drawRun(num, &x, repeatCy, 1, repColor, bg);
+    const int16_t w = spr.textWidth(num, 2);
+    spr.setTextColor(repColor, bg);
+    spr.setTextDatum(MC_DATUM);
+    spr.drawString(num, x + w / 2, repeatCy, 2);
+    x += w;
   }
   drawRun(" ]", &x, repeatCy, 1, fg, bg);
-  y += lineH + gap;
+  y += bigH + gap;
 
   // 2行目: MODE。見出しは省き、3つの選択肢だけを1行に並べる。
   // 選んでいるものを枠で囲む。文字の位置は選び方で動かない。
@@ -798,7 +804,7 @@ static void render(uint32_t now, uint16_t value, bool blank) {
     // 上段左: 状態。初期画面は代わりに SETUP (ボタンBの行き先) の札を、
     // 画面の左右中央に白地・黒文字で出す
     if (state == READY) {
-      drawBadgeCentered("SETUP", 1);
+      drawBadgeQuarterLeft("SETUP", 1);
     } else if (stateLabel() != nullptr) {
       spr.setTextColor(fg, bg);
       spr.setTextDatum(TL_DATUM);
