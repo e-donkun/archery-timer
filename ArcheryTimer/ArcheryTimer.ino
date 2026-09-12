@@ -677,65 +677,79 @@ static void drawRun(const char* text, int16_t* x, int16_t y, uint8_t font, uint1
   *x += spr.textWidth(text, font);
 }
 
+// SETUP 画面は見出し(SETUP)の下に5行を並べる。見出しは画面の左右中央に、
+// 下線つきの地の文字で出す(他画面のSETUP札のような白地の箱にはしない)。
+// 最後の行(EXIT SETUP)は、右下に出るボタンAの行き先と同じ高さに揃える。
 static void drawSetupScreen(uint32_t now, uint16_t fg, uint16_t bg) {
   const int16_t lineH = spr.fontHeight(1);
+  const int16_t gap   = 3;
+  int16_t y = 1;
 
-  // 1行目: 見出しと REPEAT
-  drawBadge("SETUP", 4, 1);
-  const int16_t topCy = 1 + badgeH() / 2;
-  int16_t x = 4 + badgeW("SETUP") + 8;
+  // 見出し: SETUP (画面の左右中央、下線つき)
+  const int16_t titleCy = y + lineH / 2;
+  spr.setTextColor(fg, bg);
+  spr.setTextDatum(MC_DATUM);
+  spr.drawString("SETUP", W / 2, titleCy, 1);
+  const int16_t titleW = spr.textWidth("SETUP", 1);
+  spr.fillRect(W / 2 - titleW / 2, y + lineH, titleW, 1, fg);   // 下線
+  y += lineH + 1 + gap;
+
+  // 1行目: REPEAT
+  const int16_t repeatCy = y + lineH / 2;
+  int16_t x = 4;
   char num[24];
-  snprintf(num, sizeof(num), "REPEAT: %u / [ ", (unsigned)roundNo);
-  drawRun(num, &x, topCy, 1, fg, bg);
+  drawRun("REPEAT: [ ", &x, repeatCy, 1, fg, bg);
   const uint16_t repColor = cursorColor(now, CUR_REPEAT, fg, bg);
   if (repeatOf() == 0) {
     const int16_t r = 3;
-    if (repColor != bg) drawInfinity(x + r * 4, topCy, r, repColor);
+    if (repColor != bg) drawInfinity(x + r * 4, repeatCy, r, repColor);
     x += r * 4;
   } else {
     snprintf(num, sizeof(num), "%u", (unsigned)repeatOf());
-    drawRun(num, &x, topCy, 1, repColor, bg);
+    drawRun(num, &x, repeatCy, 1, repColor, bg);
   }
-  drawRun(" ]", &x, topCy, 1, fg, bg);
+  drawRun(" ]", &x, repeatCy, 1, fg, bg);
+  y += lineH + gap;
 
-  // 2行目: MODE の見出し / 3行目: 3つの MODE。選んでいるものを [ ] で囲む
-  const int16_t modeY = 1 + badgeH() + 3;
+  // 2行目: MODE の見出し
   spr.setTextColor(fg, bg);
   spr.setTextDatum(TL_DATUM);
-  spr.drawString("MODE", 4, modeY, 1);
+  spr.drawString("MODE:", 4, y, 1);
+  y += lineH + 1;
 
-  // 選んでいるものを枠で囲む。文字の位置は選び方で動かない。
-  const int16_t listY = modeY + lineH + 4 + lineH / 2;   // ML_DATUM 用に中心を渡す
-  x = 5;
+  // 3行目: 3つの MODE。選んでいるものを枠で囲む。文字の位置は選び方で動かない。
+  const int16_t listCy = y + lineH / 2;
+  x = 9;
   for (uint8_t i = 0; i < MODE_COUNT; i++) {
     const bool     here = (i == modeNo);
     const int16_t  w    = spr.textWidth(MODES[i].title, 1);
     if (here) {
       const uint16_t frame = (setupCursor == CUR_MODE) ? COLOR_CURSOR : fg;
-      spr.drawRect(x - 3, listY - lineH / 2 - 2, w + 6, lineH + 4, frame);
+      spr.drawRect(x - 3, listCy - lineH / 2 - 2, w + 6, lineH + 4, frame);
     }
     const uint16_t color = here ? cursorColor(now, CUR_MODE, fg, bg) : fg;
-    drawRun(MODES[i].title, &x, listY, 1, color, bg);
+    drawRun(MODES[i].title, &x, listCy, 1, color, bg);
     x += spr.textWidth(" ", 1) + 2;
   }
+  y += lineH + gap;
 
   // 4行目: TIME。数字の枠は3桁ぶんで固定なので、桁が変わっても [ ] は動かない
-  const int16_t timeY = listY + lineH / 2 + 4 + spr.fontHeight(2) / 2;
+  const int16_t timeCy = y + spr.fontHeight(2) / 2;
   x = 4;
-  drawRun("TIME [ ", &x, timeY, 2, fg, bg);
+  drawRun("TIME [ ", &x, timeCy, 2, fg, bg);
   const int16_t slotW = spr.textWidth("000", 2);
   snprintf(num, sizeof(num), "%u", (unsigned)shootingSec());
   spr.setTextColor(cursorColor(now, CUR_TIME, fg, bg), bg);
   spr.setTextDatum(MC_DATUM);
-  spr.drawString(num, x + slotW / 2, timeY, 2);
+  spr.drawString(num, x + slotW / 2, timeCy, 2);
   x += slotW;
-  drawRun(" ] sec", &x, timeY, 2, fg, bg);
+  drawRun(" ] sec", &x, timeCy, 2, fg, bg);
 
-  // 5行目: 設定を終わる
-  const int16_t exitY = timeY + spr.fontHeight(2) / 2 + 3;
+  // 5行目: EXIT SETUP。右下に出るボタンAの行き先(ヒントバッジ)と同じ行にする。
+  const int16_t exitCy = H - 2 - badgeH() / 2;
   spr.setTextColor(cursorColor(now, CUR_EXIT, fg, bg), bg);
-  spr.setTextDatum(TL_DATUM);
-  spr.drawString("[ Exit SETUP ]", 4, exitY, 1);
+  spr.setTextDatum(ML_DATUM);
+  spr.drawString("EXIT SETUP", 4, exitCy, 1);
 }
 
 // 信号の色。行射だけが緑/黄、設定画面だけが黒で、それ以外は赤。
