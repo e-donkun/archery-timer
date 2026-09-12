@@ -101,8 +101,7 @@ static const uint8_t CMD_INIT    = 0x0E;
 static const uint8_t DIGITS         = 7;     // プロトコル上の桁数（実機が持つのは右5桁）
 static const uint8_t SEPARATOR_MODE = 0x02;  // 本体[8] 区切り(コロン)を使う時間表示
 
-static const uint32_t FRAME_INTERVAL_MS = 85;    // 実機の送信周期
-static const uint32_t INIT_RESEND_MS    = 1000;  // 送信開始の宣言を出し直す間隔
+static const uint32_t INIT_RESEND_MS = 1000;  // 送信開始の宣言を出し直す間隔
 
 static const char HEX_CHARS[] = "0123456789ABCDEF";
 
@@ -880,28 +879,29 @@ void loop() {
     blank = !beepActiveAt(now);
   }
 
-  // --- 85ms 周期で送信 ---
+  // --- 送信 (待たずに loop() のたびに送る) ---
   // 表示更新フレームを送るのをやめるとタイマーの表示が暗転してしまうので、
   // 数値が変わらないときも、止まっている画面でも、常に送り続ける必要がある。
   // (実機・Python版も静止画面で送り続けている)
-  static uint32_t nextFrameMs = 0;
-  if ((int32_t)(now - nextFrameMs) >= 0) {
-    nextFrameMs = now + FRAME_INTERVAL_MS;
-    if (BUZZER_KIND_SEL != 0 && beepActiveAt(now)) {
-      sendBuzzer(BUZZER_KIND_SEL == 1 ? 0x01 : 0x00);  // 表示の合間にブザーを挟む
-    }
-    // 表示が変わるときと、表示が止まっていても1秒ごとに、送信開始の宣言を
-    // 出す。ケーブルが抜けて挿し直されても、これでタイマーが受信モードに戻る。
-    const uint32_t shown = blank ? 0x10000UL : value;   // 消灯も別の「表示」として見る
-    static uint32_t lastShown  = 0xFFFFFFFFUL;
-    static uint32_t nextInitMs = 0;
-    if (shown != lastShown || (int32_t)(now - nextInitMs) >= 0) {
-      lastShown  = shown;
-      nextInitMs = now + INIT_RESEND_MS;
-      sendInit();
-    }
-    sendDisplay(value, blank);
+  //
+  // 送信周期を 85ms などに間引かず、loop() が回るたびにそのまま送る。
+  // RS485.write() は送信バッファに空きがあれば即座に戻り、埋まっていれば
+  // 空くまで待つので、実際の送出間隔は 9600bps の伝送時間 (32バイトの表示
+  // フレームで約33ms) がおのずと下限になる。
+  if (BUZZER_KIND_SEL != 0 && beepActiveAt(now)) {
+    sendBuzzer(BUZZER_KIND_SEL == 1 ? 0x01 : 0x00);  // 表示の合間にブザーを挟む
   }
+  // 表示が変わるときと、表示が止まっていても1秒ごとに、送信開始の宣言を
+  // 出す。ケーブルが抜けて挿し直されても、これでタイマーが受信モードに戻る。
+  const uint32_t shown = blank ? 0x10000UL : value;   // 消灯も別の「表示」として見る
+  static uint32_t lastShown  = 0xFFFFFFFFUL;
+  static uint32_t nextInitMs = 0;
+  if (shown != lastShown || (int32_t)(now - nextInitMs) >= 0) {
+    lastShown  = shown;
+    nextInitMs = now + INIT_RESEND_MS;
+    sendInit();
+  }
+  sendDisplay(value, blank);
 
   // --- 本体側のブザーと赤色LED (画面に出す白枠と同じタイミング) ---
   {
