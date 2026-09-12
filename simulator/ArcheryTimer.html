@@ -533,9 +533,18 @@ function drawRun(text, xRef, y, font, color) {
 // SETUP 画面は見出し(SETUP)の下に5行を並べる。見出しは画面の左右中央に、
 // 下線つきの地の文字で出す(他画面のSETUP札のような白地の箱にはしない)。
 // 最後の行(EXIT SETUP)は、右下に出るボタンAの行き先と同じ高さに揃える。
+// カーソルのある行の頭に ">" を出す。点滅はさせず、値が点滅で消えている間も
+// どの行を選んでいるか分かるようにする。
+function drawRowCursor(at, cy, fg, bg) {
+  if (setupCursor !== at) return;
+  drawString(">", 2, cy, 1, fg, "ML");
+}
+
 function drawSetupScreen(now, fg, bg) {
   const lineH = fontHeight(1);
   const gap = 3;
+  // 本文の左端。">" カーソルぶんの余白をあけておく。
+  const textX = 2 + textWidth(">", 1) + 3;
   let y = 1;
 
   // 見出し: SETUP (画面の左右中央、白地・黒文字の札)
@@ -544,7 +553,8 @@ function drawSetupScreen(now, fg, bg) {
 
   // 1行目: REPEAT
   const repeatCy = y + lineH / 2;
-  const xr = { x: 4 };
+  drawRowCursor(CUR_REPEAT, repeatCy, fg, bg);
+  const xr = { x: textX };
   drawRun("REPEAT: [ ", xr, repeatCy, 1, fg);
   const repColor = cursorColor(now, CUR_REPEAT, fg, bg);
   if (repeatOf() === 0) {
@@ -558,12 +568,13 @@ function drawSetupScreen(now, fg, bg) {
   y += lineH + gap;
 
   // 2行目: MODE の見出し
-  drawString("MODE:", 4, y, 1, fg, "TL");
+  drawRowCursor(CUR_MODE, y + lineH / 2, fg, bg);
+  drawString("MODE:", textX, y, 1, fg, "TL");
   y += lineH + 1;
 
   // 3行目: 3つの MODE。選んでいるものを枠で囲む。文字の位置は選び方で動かない。
   const listCy = y + lineH / 2;
-  const xl = { x: 9 };
+  const xl = { x: textX + 5 };
   for (let i = 0; i < MODE_COUNT; i++) {
     const here = (i === modeNo);
     const w = textWidth(MODES[i].title, 1);
@@ -572,15 +583,16 @@ function drawSetupScreen(now, fg, bg) {
       drawRect(xl.x - 3, listCy - lineH / 2 - 2, w + 6, lineH + 4, frame);
     }
     drawRun(MODES[i].title, xl, listCy, 1, here ? cursorColor(now, CUR_MODE, fg, bg) : fg);
-    xl.x += textWidth(" ", 1) + 2;
+    xl.x += 3;   // 画面幅に収めるため、項目の間隔は詰めておく
   }
   y += lineH + gap;
 
   // 4行目: TIME。REPEAT・MODE・EXITと同じ大きさの文字にする。
   // 数字の枠は3桁ぶんで固定なので、桁が変わっても [ ] は動かない
   const timeCy = y + lineH / 2;
-  const xt = { x: 4 };
-  drawRun("TIME [ ", xt, timeCy, 1, fg);
+  drawRowCursor(CUR_TIME, timeCy, fg, bg);
+  const xt = { x: textX };
+  drawRun("TIME: [ ", xt, timeCy, 1, fg);
   const slotW = textWidth("000", 1);
   drawString(String(shootingSec()), xt.x + slotW / 2, timeCy, 1,
              cursorColor(now, CUR_TIME, fg, bg), "MC");
@@ -589,7 +601,8 @@ function drawSetupScreen(now, fg, bg) {
 
   // 5行目: EXIT SETUP。右下に出るボタンAの行き先(ヒントバッジ)と同じ行にする。
   const exitCy = H - 2 - badgeH() / 2;
-  drawString("EXIT SETUP", 4, exitCy, 1, cursorColor(now, CUR_EXIT, fg, bg), "ML");
+  drawRowCursor(CUR_EXIT, exitCy, fg, bg);
+  drawString("EXIT SETUP", textX, exitCy, 1, cursorColor(now, CUR_EXIT, fg, bg), "ML");
 }
 
 function signalColor(now) {
