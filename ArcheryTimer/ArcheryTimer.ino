@@ -696,6 +696,7 @@ static void drawRowCursor(uint8_t at, int16_t cy, uint16_t fg, uint16_t bg) {
 
 static void drawSetupScreen(uint32_t now, uint16_t fg, uint16_t bg) {
   const int16_t lineH = spr.fontHeight(1);
+  const int16_t bigH  = spr.fontHeight(2);   // TIME の数字だけ大きくする
   const int16_t gap   = 3;
   // 本文の左端。">" カーソルぶんの余白をあけておく。
   const int16_t textX = 2 + spr.textWidth(">", 1) + 3;
@@ -723,16 +724,11 @@ static void drawSetupScreen(uint32_t now, uint16_t fg, uint16_t bg) {
   drawRun(" ]", &x, repeatCy, 1, fg, bg);
   y += lineH + gap;
 
-  // 2行目: MODE の見出し
-  drawRowCursor(CUR_MODE, y + lineH / 2, fg, bg);
-  spr.setTextColor(fg, bg);
-  spr.setTextDatum(TL_DATUM);
-  spr.drawString("MODE:", textX, y, 1);
-  y += lineH + 1;
-
-  // 3行目: 3つの MODE。選んでいるものを枠で囲む。文字の位置は選び方で動かない。
+  // 2行目: MODE。見出しは省き、3つの選択肢だけを1行に並べる。
+  // 選んでいるものを枠で囲む。文字の位置は選び方で動かない。
   const int16_t listCy = y + lineH / 2;
-  x = textX + 5;
+  drawRowCursor(CUR_MODE, listCy, fg, bg);
+  x = textX;
   for (uint8_t i = 0; i < MODE_COUNT; i++) {
     const bool     here = (i == modeNo);
     const int16_t  w    = spr.textWidth(MODES[i].title, 1);
@@ -746,21 +742,21 @@ static void drawSetupScreen(uint32_t now, uint16_t fg, uint16_t bg) {
   }
   y += lineH + gap;
 
-  // 4行目: TIME。REPEAT・MODE・EXITと同じ大きさの文字にする。
+  // 3行目: TIME。ラベルは他の行と同じ大きさ、秒数だけ大きい文字にする。
   // 数字の枠は3桁ぶんで固定なので、桁が変わっても [ ] は動かない
-  const int16_t timeCy = y + lineH / 2;
+  const int16_t timeCy = y + bigH / 2;
   drawRowCursor(CUR_TIME, timeCy, fg, bg);
   x = textX;
   drawRun("TIME: [ ", &x, timeCy, 1, fg, bg);
-  const int16_t slotW = spr.textWidth("000", 1);
+  const int16_t slotW = spr.textWidth("000", 2);
   snprintf(num, sizeof(num), "%u", (unsigned)shootingSec());
   spr.setTextColor(cursorColor(now, CUR_TIME, fg, bg), bg);
   spr.setTextDatum(MC_DATUM);
-  spr.drawString(num, x + slotW / 2, timeCy, 1);
+  spr.drawString(num, x + slotW / 2, timeCy, 2);
   x += slotW;
   drawRun(" ] sec", &x, timeCy, 1, fg, bg);
 
-  // 5行目: EXIT SETUP。右下に出るボタンAの行き先(ヒントバッジ)と同じ行にする。
+  // 4行目: EXIT SETUP。右下に出るボタンAの行き先(ヒントバッジ)と同じ行にする。
   const int16_t exitCy = H - 2 - badgeH() / 2;
   drawRowCursor(CUR_EXIT, exitCy, fg, bg);
   spr.setTextColor(cursorColor(now, CUR_EXIT, fg, bg), bg);

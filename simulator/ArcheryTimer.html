@@ -542,6 +542,7 @@ function drawRowCursor(at, cy, fg, bg) {
 
 function drawSetupScreen(now, fg, bg) {
   const lineH = fontHeight(1);
+  const bigH = fontHeight(2);   // TIME の数字だけ大きくする
   const gap = 3;
   // 本文の左端。">" カーソルぶんの余白をあけておく。
   const textX = 2 + textWidth(">", 1) + 3;
@@ -567,14 +568,11 @@ function drawSetupScreen(now, fg, bg) {
   drawRun(" ]", xr, repeatCy, 1, fg);
   y += lineH + gap;
 
-  // 2行目: MODE の見出し
-  drawRowCursor(CUR_MODE, y + lineH / 2, fg, bg);
-  drawString("MODE:", textX, y, 1, fg, "TL");
-  y += lineH + 1;
-
-  // 3行目: 3つの MODE。選んでいるものを枠で囲む。文字の位置は選び方で動かない。
+  // 2行目: MODE。見出しは省き、3つの選択肢だけを1行に並べる。
+  // 選んでいるものを枠で囲む。文字の位置は選び方で動かない。
   const listCy = y + lineH / 2;
-  const xl = { x: textX + 5 };
+  drawRowCursor(CUR_MODE, listCy, fg, bg);
+  const xl = { x: textX };
   for (let i = 0; i < MODE_COUNT; i++) {
     const here = (i === modeNo);
     const w = textWidth(MODES[i].title, 1);
@@ -587,19 +585,19 @@ function drawSetupScreen(now, fg, bg) {
   }
   y += lineH + gap;
 
-  // 4行目: TIME。REPEAT・MODE・EXITと同じ大きさの文字にする。
+  // 3行目: TIME。ラベルは他の行と同じ大きさ、秒数だけ大きい文字にする。
   // 数字の枠は3桁ぶんで固定なので、桁が変わっても [ ] は動かない
-  const timeCy = y + lineH / 2;
+  const timeCy = y + bigH / 2;
   drawRowCursor(CUR_TIME, timeCy, fg, bg);
   const xt = { x: textX };
   drawRun("TIME: [ ", xt, timeCy, 1, fg);
-  const slotW = textWidth("000", 1);
-  drawString(String(shootingSec()), xt.x + slotW / 2, timeCy, 1,
+  const slotW = textWidth("000", 2);
+  drawString(String(shootingSec()), xt.x + slotW / 2, timeCy, 2,
              cursorColor(now, CUR_TIME, fg, bg), "MC");
   xt.x += slotW;
   drawRun(" ] sec", xt, timeCy, 1, fg);
 
-  // 5行目: EXIT SETUP。右下に出るボタンAの行き先(ヒントバッジ)と同じ行にする。
+  // 4行目: EXIT SETUP。右下に出るボタンAの行き先(ヒントバッジ)と同じ行にする。
   const exitCy = H - 2 - badgeH() / 2;
   drawRowCursor(CUR_EXIT, exitCy, fg, bg);
   drawString("EXIT SETUP", textX, exitCy, 1, cursorColor(now, CUR_EXIT, fg, bg), "ML");
