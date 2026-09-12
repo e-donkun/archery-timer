@@ -880,7 +880,10 @@ void loop() {
     blank = !beepActiveAt(now);
   }
 
-  // --- 85ms 周期で送信 (実機は静止画面でも送り続けている) ---
+  // --- 85ms 周期で送信 ---
+  // 表示更新フレームを送るのをやめるとタイマーの表示が暗転してしまうので、
+  // 数値が変わらないときも、止まっている画面でも、常に送り続ける必要がある。
+  // (実機・Python版も静止画面で送り続けている)
   static uint32_t nextFrameMs = 0;
   if ((int32_t)(now - nextFrameMs) >= 0) {
     nextFrameMs = now + FRAME_INTERVAL_MS;
