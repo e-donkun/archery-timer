@@ -850,23 +850,26 @@ void loop() {
   const uint32_t now = millis();
 
   // --- 入力 ---
+  bool keyActed = false;                  // このループでボタンの操作があったか
   static bool longFiredA = false;
   if (M5.BtnA.isPressed() && !longFiredA && M5.BtnA.pressedFor(LONG_PRESS_MS)) {
     longFiredA = true;
     keyRight(now);                        // A長押し = 早送り
+    keyActed = true;
   }
   if (M5.BtnA.wasReleased()) {
-    if (!longFiredA) keySpace(now);       // A短押し = 開始/再開
+    if (!longFiredA) { keySpace(now); keyActed = true; }  // A短押し = 開始/再開
     longFiredA = false;
   }
 
   static bool longFiredB = false;
   if (M5.BtnB.isPressed() && !longFiredB && M5.BtnB.pressedFor(LONG_PRESS_MS)) {
     longFiredB = true;
-    keyReset(now);                        // B長押し = 中断 / 待機へ戻す / 設定画面
+    keyReset(now);                        // B長押し = 中断 / 初期画面へ
+    keyActed = true;
   }
   if (M5.BtnB.wasReleased()) {
-    if (!longFiredB) keyEnter(now);       // B短押し = 繰り返し回数 / 中断
+    if (!longFiredB) { keyEnter(now); keyActed = true; }  // B短押し = 設定 / 中断
     longFiredB = false;
   }
 
@@ -880,24 +883,35 @@ void loop() {
     blank = !beepActiveAt(now);
   }
 
-  // --- 85ms 周期で送信 (実機は静止画面でも送り続けている) ---
+  // --- 表示更新フレームを出すかどうか ---
+  // 画面(状態)が切り替わったときと、ボタンを押したときだけ送る。カウントダウンで
+  // 秒が減っているだけのときは送らない。送信は 85ms 周期の中で行うので、
+  // ボタンを押した合図をここで覚えておいて、次の周期で送る。
+  static State   sentState   = FINISHED;
+  static uint8_t sentMode    = 0xFF;
+  static bool    dispPending = true;      // 起動直後に1回だけ送る
+  if (keyActed || state != sentState || modeNo != sentMode) dispPending = true;
+
+  // --- 85ms 周期で送信 ---
   static uint32_t nextFrameMs = 0;
   if ((int32_t)(now - nextFrameMs) >= 0) {
     nextFrameMs = now + FRAME_INTERVAL_MS;
     if (BUZZER_KIND_SEL != 0 && beepActiveAt(now)) {
-      sendBuzzer(BUZZER_KIND_SEL == 1 ? 0x01 : 0x00);  // 表示の合間にブザーを挟む
+      sendBuzzer(BUZZER_KIND_SEL == 1 ? 0x01 : 0x00);  // ブザーは鳴っている間ずっと送る
     }
-    // 表示が変わるときと、表示が止まっていても1秒ごとに、送信開始の宣言を
-    // 出す。ケーブルが抜けて挿し直されても、これでタイマーが受信モードに戻る。
-    const uint32_t shown = blank ? 0x10000UL : value;   // 消灯も別の「表示」として見る
-    static uint32_t lastShown  = 0xFFFFFFFFUL;
+    // 送信開始の宣言は、表示を送る直前と、何も送らない間も1秒ごとに出す。
+    // ケーブルが抜けて挿し直されても、これでタイマーが受信モードに戻る。
     static uint32_t nextInitMs = 0;
-    if (shown != lastShown || (int32_t)(now - nextInitMs) >= 0) {
-      lastShown  = shown;
+    if (dispPending || (int32_t)(now - nextInitMs) >= 0) {
       nextInitMs = now + INIT_RESEND_MS;
       sendInit();
     }
-    sendDisplay(value, blank);
+    if (dispPending) {
+      dispPending = false;
+      sentState   = state;
+      sentMode    = modeNo;
+      sendDisplay(value, blank);
+    }
   }
 
   // --- 本体側のブザーと赤色LED (画面に出す白枠と同じタイミング) ---
