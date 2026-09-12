@@ -488,6 +488,9 @@ function drawBadge(text, x, y) {
 }
 const drawKeyHint = (text) => drawBadge(text, W - 2 - badgeW(text), H - 2 - badgeH());
 
+// 画面の左右中央に白地・黒文字の札を出す。
+const drawBadgeCentered = (text, y) => drawBadge(text, (W - badgeW(text)) / 2, y);
+
 const INF_R = 5, INF_W = INF_R * 4, INF_CY = 8;
 function drawInfinity(rightX, cy, r, color) {
   const cx2 = rightX - r, cx1 = cx2 - r * 2;
@@ -535,12 +538,9 @@ function drawSetupScreen(now, fg, bg) {
   const gap = 3;
   let y = 1;
 
-  // 見出し: SETUP (画面の左右中央、下線つき)
-  const titleCy = y + lineH / 2;
-  drawString("SETUP", W / 2, titleCy, 1, fg, "MC");
-  const titleW = textWidth("SETUP", 1);
-  fillRect(W / 2 - titleW / 2, y + lineH, titleW, 1, fg);   // 下線
-  y += lineH + 1 + gap;
+  // 見出し: SETUP (画面の左右中央、白地・黒文字の札)
+  drawBadgeCentered("SETUP", y);
+  y += badgeH() + gap;
 
   // 1行目: REPEAT
   const repeatCy = y + lineH / 2;
@@ -576,15 +576,16 @@ function drawSetupScreen(now, fg, bg) {
   }
   y += lineH + gap;
 
-  // 4行目: TIME (数字の枠は3桁ぶんで固定)
-  const timeCy = y + fontHeight(2) / 2;
+  // 4行目: TIME。REPEAT・MODE・EXITと同じ大きさの文字にする。
+  // 数字の枠は3桁ぶんで固定なので、桁が変わっても [ ] は動かない
+  const timeCy = y + lineH / 2;
   const xt = { x: 4 };
-  drawRun("TIME [ ", xt, timeCy, 2, fg);
-  const slotW = textWidth("000", 2);
-  drawString(String(shootingSec()), xt.x + slotW / 2, timeCy, 2,
+  drawRun("TIME [ ", xt, timeCy, 1, fg);
+  const slotW = textWidth("000", 1);
+  drawString(String(shootingSec()), xt.x + slotW / 2, timeCy, 1,
              cursorColor(now, CUR_TIME, fg, bg), "MC");
   xt.x += slotW;
-  drawRun(" ] sec", xt, timeCy, 2, fg);
+  drawRun(" ] sec", xt, timeCy, 1, fg);
 
   // 5行目: EXIT SETUP。右下に出るボタンAの行き先(ヒントバッジ)と同じ行にする。
   const exitCy = H - 2 - badgeH() / 2;
@@ -614,7 +615,7 @@ function render(now, value, blank) {
   } else {
     drawTopRight(fg);
 
-    if (state === READY)            drawBadge("SETUP", 4, 1);
+    if (state === READY)            drawBadgeCentered("SETUP", 1);
     else if (stateLabel() !== null) drawString(stateLabel(), 4, 0, 2, fg, "TL");
 
     if (!blank) {

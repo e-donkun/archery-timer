@@ -602,6 +602,11 @@ static void drawBadge(const char* text, int16_t x, int16_t y) {
   spr.drawString(text, x + w / 2, y + h / 2, 1);
 }
 
+// 画面の左右中央に白地・黒文字の札を出す。
+static void drawBadgeCentered(const char* text, int16_t y) {
+  drawBadge(text, (W - badgeW(text)) / 2, y);
+}
+
 // ボタンAの行き先は右下に出す
 static void drawKeyHint(const char* text) {
   drawBadge(text, W - 2 - badgeW(text), H - 2 - badgeH());
@@ -685,14 +690,9 @@ static void drawSetupScreen(uint32_t now, uint16_t fg, uint16_t bg) {
   const int16_t gap   = 3;
   int16_t y = 1;
 
-  // 見出し: SETUP (画面の左右中央、下線つき)
-  const int16_t titleCy = y + lineH / 2;
-  spr.setTextColor(fg, bg);
-  spr.setTextDatum(MC_DATUM);
-  spr.drawString("SETUP", W / 2, titleCy, 1);
-  const int16_t titleW = spr.textWidth("SETUP", 1);
-  spr.fillRect(W / 2 - titleW / 2, y + lineH, titleW, 1, fg);   // 下線
-  y += lineH + 1 + gap;
+  // 見出し: SETUP (画面の左右中央、白地・黒文字の札)
+  drawBadgeCentered("SETUP", y);
+  y += badgeH() + gap;
 
   // 1行目: REPEAT
   const int16_t repeatCy = y + lineH / 2;
@@ -733,17 +733,18 @@ static void drawSetupScreen(uint32_t now, uint16_t fg, uint16_t bg) {
   }
   y += lineH + gap;
 
-  // 4行目: TIME。数字の枠は3桁ぶんで固定なので、桁が変わっても [ ] は動かない
-  const int16_t timeCy = y + spr.fontHeight(2) / 2;
+  // 4行目: TIME。REPEAT・MODE・EXITと同じ大きさの文字にする。
+  // 数字の枠は3桁ぶんで固定なので、桁が変わっても [ ] は動かない
+  const int16_t timeCy = y + lineH / 2;
   x = 4;
-  drawRun("TIME [ ", &x, timeCy, 2, fg, bg);
-  const int16_t slotW = spr.textWidth("000", 2);
+  drawRun("TIME [ ", &x, timeCy, 1, fg, bg);
+  const int16_t slotW = spr.textWidth("000", 1);
   snprintf(num, sizeof(num), "%u", (unsigned)shootingSec());
   spr.setTextColor(cursorColor(now, CUR_TIME, fg, bg), bg);
   spr.setTextDatum(MC_DATUM);
-  spr.drawString(num, x + slotW / 2, timeCy, 2);
+  spr.drawString(num, x + slotW / 2, timeCy, 1);
   x += slotW;
-  drawRun(" ] sec", &x, timeCy, 2, fg, bg);
+  drawRun(" ] sec", &x, timeCy, 1, fg, bg);
 
   // 5行目: EXIT SETUP。右下に出るボタンAの行き先(ヒントバッジ)と同じ行にする。
   const int16_t exitCy = H - 2 - badgeH() / 2;
@@ -783,9 +784,10 @@ static void render(uint32_t now, uint16_t value, bool blank) {
     // 上段右: 「立」または MODE の名前
     drawTopRight(fg, bg);
 
-    // 上段左: 状態。初期画面は代わりに SETUP (ボタンBの行き先) の札を出す
+    // 上段左: 状態。初期画面は代わりに SETUP (ボタンBの行き先) の札を、
+    // 画面の左右中央に白地・黒文字で出す
     if (state == READY) {
-      drawBadge("SETUP", 4, 1);
+      drawBadgeCentered("SETUP", 1);
     } else if (stateLabel() != nullptr) {
       spr.setTextColor(fg, bg);
       spr.setTextDatum(TL_DATUM);
